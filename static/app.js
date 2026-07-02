@@ -1,4 +1,4 @@
-// Data and state
+// Dados e estado
 let earthData = [];
 let simInterval = 15;
 let currentTheme = 'thermal';
@@ -6,7 +6,7 @@ let lastUpdate = Date.now();
 let nextUpdate = Date.now() + simInterval * 60 * 1000;
 let countdownIntervalId = null;
 
-// Initialize Globe - minimal, clean base
+// Inicializa o globo - base mínima e limpa
 const world = Globe()
     (document.getElementById('globe-container'))
     .globeImageUrl('https://unpkg.com/three-globe/example/img/earth-dark.jpg')
@@ -16,23 +16,23 @@ const world = Globe()
     .atmosphereColor('#1a3a6b')
     .atmosphereAltitude(0.16);
 
-// Auto-rotation
+// Rotação automática
 world.controls().autoRotate = true;
 world.controls().autoRotateSpeed = 0.35;
 const controls = world.controls();
 controls.addEventListener('start', () => { controls.autoRotate = false; });
 
-// Bring the camera closer so the planet fills more of the view (astronomical feel)
+// Aproxima a câmera para o planeta preencher mais a tela (sensação astronômica)
 world.pointOfView({ lat: 0, lng: -60, altitude: 1.7 });
 
-// Surface material: terrain relief (bump) + subtle sheen so it reads as a planet
+// Material da superfície: relevo do terreno (bump) + brilho sutil para parecer um planeta
 const globeMat = world.globeMaterial();
 globeMat.bumpScale = 6;
 globeMat.shininess = 14;
-try { globeMat.specular.set(0x223333); } catch (e) { /* older three */ }
+try { globeMat.specular.set(0x223333); } catch (e) { /* three antigo */ }
 
-// Lighting: a directional "sun" adds a moving day/night terminator and picks out
-// the relief, while a fairly strong ambient keeps the night side readable.
+// Iluminação: um "sol" direcional cria um terminador dia/noite em movimento e realça
+// o relevo, enquanto uma luz ambiente forte mantém o lado noturno legível.
 try {
     (world.lights() || []).forEach((light) => {
         if (light.type === 'AmbientLight') light.intensity = 0.75;
@@ -41,9 +41,9 @@ try {
             light.position.set(-1, 0.5, 1);
         }
     });
-} catch (e) { /* keep default lighting */ }
+} catch (e) { /* mantém a iluminação padrão */ }
 
-// ─── Color Palettes ───────────────────────────────────────────────────────────
+// ─── Paletas de cores ─────────────────────────────────────────────────────────
 
 const paletteDefs = {
     thermal: [
@@ -101,7 +101,7 @@ function interpolateColor(temp, palette) {
     return [0, 0, 0];
 }
 
-// Precomputed color lookup table per palette (avoids per-pixel allocation)
+// Tabela de cores pré-calculada por paleta (evita alocação por pixel)
 const LUT_SIZE = 512;
 const LUT_MIN = -60;
 const LUT_MAX = 60;
@@ -120,16 +120,16 @@ function getLUT(palette) {
     return lutCache[palette];
 }
 
-// For tooltip colors
+// Para as cores do tooltip
 function tempToHex(temp) {
     const [r, g, b] = interpolateColor(temp, currentTheme);
     return `rgb(${r},${g},${b})`;
 }
 
-// ─── Canvas Heatmap Texture ───────────────────────────────────────────────────
-// The heatmap is composited into an equirectangular canvas and applied directly
-// as the globe's surface texture via globe.gl's globeImageUrl(). This guarantees
-// perfect alignment with the sphere and needs no direct access to THREE.
+// ─── Textura do mapa de calor (canvas) ───────────────────────────────────────
+// O mapa de calor é montado num canvas equiretangular e aplicado diretamente
+// como textura da superfície do globo via globeImageUrl() do globe.gl. Isso garante
+// alinhamento perfeito com a esfera e não precisa acessar o THREE diretamente.
 
 const CANVAS_W = 2048;
 const CANVAS_H = 1024;
@@ -138,8 +138,8 @@ offscreenCanvas.width = CANVAS_W;
 offscreenCanvas.height = CANVAS_H;
 const ctx = offscreenCanvas.getContext('2d');
 
-// Faint Earth overlay so continents remain recognizable under the heatmap
-// Tweak these two to taste: TINT = flat land/ocean separation, TEXTURE = relief detail
+// Sobreposição tênue da Terra para os continentes ficarem reconhecíveis sob o mapa de calor
+// Ajuste estes dois a gosto: TINT = separação terra/oceano, TEXTURE = detalhe de relevo
 const EARTH_TINT_ALPHA = 0.16;
 const EARTH_TEXTURE_ALPHA = 0.35;
 const earthImg = new Image();
@@ -152,7 +152,7 @@ earthImg.onload = () => {
 earthImg.onerror = () => { earthImgLoaded = false; };
 earthImg.src = 'https://unpkg.com/three-globe/example/img/earth-dark.jpg';
 
-// Country borders as crisp 3D vector outlines (stay sharp at any zoom level)
+// Fronteiras dos países como contornos vetoriais 3D nítidos (não pixelizam no zoom)
 const BORDERS_URL = 'https://raw.githubusercontent.com/vasturiano/globe.gl/master/example/datasets/ne_110m_admin_0_countries.geojson';
 
 fetch(BORDERS_URL)
@@ -169,7 +169,7 @@ fetch(BORDERS_URL)
     })
     .catch(err => console.warn('Could not load borders GeoJSON', err));
 
-// Binary search: largest index i with arr[i] <= v (clamped to valid range)
+// Busca binária: maior índice i com arr[i] <= v (limitado à faixa válida)
 function bracket(arr, v) {
     if (v <= arr[0]) return 0;
     const last = arr.length - 1;
@@ -183,22 +183,22 @@ function bracket(arr, v) {
 }
 
 function renderHeatmapCanvas(points, palette, withEarth) {
-    // Derive the actual grid axes straight from the data (no assumption of step/offset)
+    // Deriva os eixos reais da grade direto dos dados (sem supor passo/deslocamento)
     const latSet = new Set(), lngSet = new Set();
     for (const p of points) { latSet.add(p.lat); lngSet.add(p.lng); }
-    const lats = [...latSet].sort((a, b) => a - b); // ascending: south -> north
-    const lngs = [...lngSet].sort((a, b) => a - b); // ascending: west -> east
+    const lats = [...latSet].sort((a, b) => a - b); // crescente: sul -> norte
+    const lngs = [...lngSet].sort((a, b) => a - b); // crescente: oeste -> leste
 
     const idxLat = new Map(lats.map((v, i) => [v, i]));
     const idxLng = new Map(lngs.map((v, i) => [v, i]));
 
-    // 2D temperature array T[latIndex][lngIndex]
+    // Matriz 2D de temperatura T[índiceLat][índiceLng]
     const T = lats.map(() => new Float32Array(lngs.length));
     for (const p of points) {
         T[idxLat.get(p.lat)][idxLng.get(p.lng)] = p.temp;
     }
 
-    // Precompute per-column longitude bracket + fraction
+    // Pré-calcula, por coluna, o intervalo de longitude + a fração
     const colLo = new Int32Array(CANVAS_W);
     const colFrac = new Float32Array(CANVAS_W);
     for (let px = 0; px < CANVAS_W; px++) {
@@ -215,7 +215,7 @@ function renderHeatmapCanvas(points, palette, withEarth) {
     const data = imageData.data;
 
     for (let py = 0; py < CANVAS_H; py++) {
-        // Top of the texture is +90 (north), bottom is -90
+        // O topo da textura é +90 (norte), a base é -90
         const lat = 90 - ((py + 0.5) / CANVAS_H) * 180;
         const i0 = bracket(lats, lat);
         const i1 = Math.min(i0 + 1, lats.length - 1);
@@ -253,13 +253,13 @@ function renderHeatmapCanvas(points, palette, withEarth) {
 
     ctx.putImageData(imageData, 0, 0);
 
-    // Continents: flat tint for land/ocean separation + soft-light relief texture
+    // Continentes: tinte simples para separar terra/oceano + textura de relevo em soft-light
     if (withEarth && earthImgLoaded) {
         ctx.save();
         ctx.globalCompositeOperation = 'source-over';
         ctx.globalAlpha = EARTH_TINT_ALPHA;
         ctx.drawImage(earthImg, 0, 0, CANVAS_W, CANVAS_H);
-        // Imprints terrain detail while preserving the heatmap hue
+        // Imprime o detalhe do terreno preservando a cor do mapa de calor
         ctx.globalCompositeOperation = 'soft-light';
         ctx.globalAlpha = EARTH_TEXTURE_ALPHA;
         ctx.drawImage(earthImg, 0, 0, CANVAS_W, CANVAS_H);
@@ -273,7 +273,7 @@ function applyHeatmap(points, palette) {
     try {
         world.globeImageUrl(offscreenCanvas.toDataURL('image/jpeg', 0.92));
     } catch (e) {
-        // If the cross-origin Earth image tainted the canvas, retry without it
+        // Se a imagem cross-origin da Terra contaminou o canvas, tenta de novo sem ela
         earthImgLoaded = false;
         renderHeatmapCanvas(points, palette, false);
         try {
@@ -284,7 +284,7 @@ function applyHeatmap(points, palette) {
     }
 }
 
-// ─── Tooltip (mouse hover) ────────────────────────────────────────────────────
+// ─── Tooltip (ao passar o mouse) ──────────────────────────────────────────────
 const tooltip = document.createElement('div');
 tooltip.id = 'heatmap-tooltip';
 tooltip.style.cssText = `
@@ -305,7 +305,7 @@ tooltip.style.cssText = `
 document.body.appendChild(tooltip);
 
 function showTooltipAt(clientX, clientY) {
-    // Convert the viewport pixel under the cursor to globe coordinates
+    // Converte o pixel da tela sob o cursor em coordenadas do globo
     const coords = world.toGlobeCoords(clientX, clientY);
     if (!coords || !earthData.length) {
         tooltip.style.display = 'none';
@@ -339,7 +339,7 @@ document.getElementById('globe-container').addEventListener('mouseleave', () => 
     tooltip.style.display = 'none';
 });
 
-// ─── Fetch & Update ───────────────────────────────────────────────────────────
+// ─── Busca e atualização ──────────────────────────────────────────────────────
 
 async function fetchData() {
     try {
@@ -410,7 +410,7 @@ function startCountdown() {
     countdownIntervalId = setInterval(tick, 1000);
 }
 
-// ─── Event Listeners ──────────────────────────────────────────────────────────
+// ─── Ouvintes de eventos ──────────────────────────────────────────────────────
 
 document.getElementById('theme-selector').addEventListener('change', (e) => {
     currentTheme = e.target.value;
@@ -442,5 +442,5 @@ window.addEventListener('resize', () => {
     world.height(window.innerHeight);
 });
 
-// ─── Boot ─────────────────────────────────────────────────────────────────────
+// ─── Início ───────────────────────────────────────────────────────────────────
 fetchData();

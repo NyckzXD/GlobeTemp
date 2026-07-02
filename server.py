@@ -12,20 +12,20 @@ from urllib.error import HTTPError
 
 PORT = 5005
 
-# ─── Configuration ─────────────────────────────────────────────────────────────
-# Open-Meteo's free tier limits by NUMBER OF LOCATIONS (~600/min, ~10k/day), not
-# by number of requests. A dense global grid blows that instantly, so we use a
-# coarse grid (the client interpolates) and refresh infrequently.
-GRID_STEP = 12                # degrees between samples -> 16 x 31 = 496 points
-CHUNK = 100                   # locations per Open-Meteo request
-MIN_INTERVAL_MIN = 60         # real weather changes slowly; protects the quota
+# ─── Configuração ──────────────────────────────────────────────────────────────
+# O plano gratuito do Open-Meteo limita por NÚMERO DE LOCALIZAÇÕES (~600/min, ~10k/dia),
+# não por número de requisições. Uma grade global densa estoura na hora, então usamos uma
+# grade grossa (o cliente interpola) e atualizamos com pouca frequência.
+GRID_STEP = 12                # graus entre amostras -> 16 x 31 = 496 pontos
+CHUNK = 100                   # localizações por requisição ao Open-Meteo
+MIN_INTERVAL_MIN = 60         # o clima real muda devagar; protege a cota
 DEFAULT_INTERVAL_MIN = 60
-RATE_LIMIT_BACKOFF = 300      # seconds to wait after a 429
+RATE_LIMIT_BACKOFF = 300      # segundos de espera após um 429
 OPEN_METEO_URL = 'https://api.open-meteo.com/v1/forecast'
 
-# Some systems (notably stock macOS/Windows Python) fail TLS verification with
-# urllib. We keep verification on and only fall back to an unverified context for
-# this public, read-only weather API if the first attempt raises an SSL error.
+# Alguns sistemas (notadamente o Python padrão do macOS/Windows) falham na verificação TLS
+# do urllib. Mantemos a verificação ligada e só caímos para um contexto sem verificação
+# nesta API pública e somente-leitura de clima se a primeira tentativa der erro de SSL.
 _INSECURE_CTX = ssl.create_default_context()
 _INSECURE_CTX.check_hostname = False
 _INSECURE_CTX.verify_mode = ssl.CERT_NONE
@@ -47,13 +47,13 @@ class ThermalSimulation:
         self.source = 'synthetic'
         self.last_update = time.time()
 
-        # Instant synthetic fill so the UI has data immediately on first load
+        # Preenchimento sintético imediato para a UI já ter dados no primeiro carregamento
         self._apply(self._synthetic_temps(), 'synthetic')
 
-        # Real data is fetched in the background so the server starts instantly.
+        # Os dados reais são buscados em segundo plano para o servidor subir na hora.
         threading.Thread(target=self._refresh_loop, daemon=True).start()
 
-    # ─── Temperature sources ───────────────────────────────────────────────────
+    # ─── Fontes de temperatura ─────────────────────────────────────────────────
     def _synthetic_temps(self):
         temps = {}
         for (lat, lng) in self.coords:
@@ -77,7 +77,7 @@ class ThermalSimulation:
             with urllib.request.urlopen(req, timeout=15, context=_INSECURE_CTX) as resp:
                 body = json.loads(resp.read().decode('utf-8'))
 
-        # Single-location -> object; multi-location -> list (order preserved)
+        # Uma localização -> objeto; várias localizações -> lista (ordem preservada)
         if isinstance(body, dict):
             body = [body]
         return [((item or {}).get('current') or {}).get('temperature_2m') for item in body]
@@ -92,7 +92,7 @@ class ThermalSimulation:
                     vals = (vals + [None] * len(chunk))[:len(chunk)]
                 for coord, v in zip(chunk, vals):
                     temps[coord] = v
-                time.sleep(0.3)  # be polite between requests
+                time.sleep(0.3)  # educado entre as requisições
         except HTTPError as e:
             if e.code == 429:
                 self._backoff_until = time.time() + RATE_LIMIT_BACKOFF
@@ -104,14 +104,14 @@ class ThermalSimulation:
             print("Open-Meteo fetch failed:", e)
             return None
 
-        # Fill any missing samples (rare gaps) with a latitude-based estimate
+        # Preenche amostras faltantes (falhas raras) com uma estimativa por latitude
         for (lat, lng) in self.coords:
             if temps.get((lat, lng)) is None:
                 c = math.cos(math.radians(lat))
                 temps[(lat, lng)] = 35 * c - 30 * (1 - c)
         return temps
 
-    # ─── State ──────────────────────────────────────────────────────────────────
+    # ─── Estado ─────────────────────────────────────────────────────────────────
     def _apply(self, temps, source):
         points = []
         mn, mx, s = float('inf'), float('-inf'), 0.0
@@ -136,7 +136,7 @@ class ThermalSimulation:
             cadence = max(MIN_INTERVAL_MIN, self.interval) * 60
             backing_off = now < self._backoff_until
             if self.source != 'open-meteo':
-                due = not backing_off          # keep trying until we have real data
+                due = not backing_off          # segue tentando até termos dado real
             else:
                 due = (now - self.last_update) >= cadence
 
@@ -148,7 +148,7 @@ class ThermalSimulation:
                     print(f"Real temperatures updated — min {self._stats['min']}  "
                           f"avg {self._stats['avg']}  max {self._stats['max']}")
 
-            # Poll soon while we still lack real data; relax once we have it.
+            # Verifica logo enquanto faltar dado real; relaxa quando já tiver.
             timeout = 20 if self.source != 'open-meteo' else 30
             self._refresh_now.wait(timeout=timeout)
             self._refresh_now.clear()
@@ -165,7 +165,7 @@ class ThermalSimulation:
             if self.source == 'open-meteo':
                 next_update = self.last_update + max(MIN_INTERVAL_MIN, self.interval) * 60
             else:
-                next_update = now + 15  # still fetching real data; poll again soon
+                next_update = now + 15  # ainda buscando dado real; verifica de novo em breve
             return {
                 'points': self._points,
                 'stats': self._stats,
