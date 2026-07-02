@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Earth Heatmap Globe</title>
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <!-- FontAwesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Globe.gl and Three.js -->
+    <script src="https://unpkg.com/three"></script>
+    <script src="https://unpkg.com/globe.gl"></script>
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div id="globe-container"></div>
+    
+    <div id="dashboard-panel">
+        <div class="header">
+            <h1><i class="fa-solid fa-earth-americas"></i> Thermal Earth</h1>
+            <span class="status-indicator"><span class="dot pulse"></span> Live</span>
+        </div>
+        
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-label">Min Temp</div>
+                <div class="stat-value" id="min-temp">--°C</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Avg Temp</div>
+                <div class="stat-value" id="avg-temp">--°C</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Max Temp</div>
+                <div class="stat-value" id="max-temp">--°C</div>
+            </div>
+        </div>
+        
+        <div class="control-section">
+            <h3>Visual Theme</h3>
+            <select id="theme-selector">
+                <option value="thermal">Thermal (Classic)</option>
+                <option value="plasma">Plasma (Neon)</option>
+                <option value="magma">Magma (Volcanic)</option>
+                <option value="glacier">Glacier (Subzero)</option>
+            </select>
+        </div>
+        
+        <div class="control-section update-section">
+            <h3>Simulation Update</h3>
+            <div class="countdown-container">
+                <div class="countdown-text">Next update in <span id="countdown-timer">--:--</span></div>
+                <div class="progress-bar-bg">
+                    <div class="progress-bar" id="update-progress"></div>
+                </div>
+            </div>
+            <div class="interval-control">
+                <label>Interval (min): <span id="interval-display">5</span></label>
+                <input type="range" id="interval-slider" min="1" max="60" value="5">
+            </div>
+            <button id="force-update-btn"><i class="fa-solid fa-rotate"></i> Force Update</button>
+        </div>
+    </div>
+    
+    <!-- Custom JS -->
+    <script src="app.js"></script>
+</body>
+</html>
