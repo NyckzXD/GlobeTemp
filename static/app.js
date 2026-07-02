@@ -10,10 +10,11 @@ let countdownIntervalId = null;
 const world = Globe()
     (document.getElementById('globe-container'))
     .globeImageUrl('https://unpkg.com/three-globe/example/img/earth-dark.jpg')
-    .backgroundImageUrl('https://unpkg.com/three-globe/example/img/night-sky.png')
+    .bumpImageUrl('https://unpkg.com/three-globe/example/img/earth-topology.png')
+    .backgroundColor('#000000')
     .showAtmosphere(true)
     .atmosphereColor('#1a3a6b')
-    .atmosphereAltitude(0.12);
+    .atmosphereAltitude(0.16);
 
 // Auto-rotation
 world.controls().autoRotate = true;
@@ -23,6 +24,24 @@ controls.addEventListener('start', () => { controls.autoRotate = false; });
 
 // Bring the camera closer so the planet fills more of the view (astronomical feel)
 world.pointOfView({ lat: 0, lng: -60, altitude: 1.7 });
+
+// Surface material: terrain relief (bump) + subtle sheen so it reads as a planet
+const globeMat = world.globeMaterial();
+globeMat.bumpScale = 6;
+globeMat.shininess = 14;
+try { globeMat.specular.set(0x223333); } catch (e) { /* older three */ }
+
+// Lighting: a directional "sun" adds a moving day/night terminator and picks out
+// the relief, while a fairly strong ambient keeps the night side readable.
+try {
+    (world.lights() || []).forEach((light) => {
+        if (light.type === 'AmbientLight') light.intensity = 0.75;
+        else if (light.type === 'DirectionalLight') {
+            light.intensity = 1.2;
+            light.position.set(-1, 0.5, 1);
+        }
+    });
+} catch (e) { /* keep default lighting */ }
 
 // ─── Color Palettes ───────────────────────────────────────────────────────────
 
@@ -122,7 +141,7 @@ const ctx = offscreenCanvas.getContext('2d');
 // Faint Earth overlay so continents remain recognizable under the heatmap
 // Tweak these two to taste: TINT = flat land/ocean separation, TEXTURE = relief detail
 const EARTH_TINT_ALPHA = 0.16;
-const EARTH_TEXTURE_ALPHA = 0.6;
+const EARTH_TEXTURE_ALPHA = 0.35;
 const earthImg = new Image();
 earthImg.crossOrigin = 'anonymous';
 let earthImgLoaded = false;
@@ -133,63 +152,22 @@ earthImg.onload = () => {
 earthImg.onerror = () => { earthImgLoaded = false; };
 earthImg.src = 'https://unpkg.com/three-globe/example/img/earth-dark.jpg';
 
-// Country borders (drawn crisply onto the texture for clear continents)
+// Country borders as crisp 3D vector outlines (stay sharp at any zoom level)
 const BORDERS_URL = 'https://raw.githubusercontent.com/vasturiano/globe.gl/master/example/datasets/ne_110m_admin_0_countries.geojson';
-let borderRings = null; // array of rings, each ring = array of [lng, lat]
 
 fetch(BORDERS_URL)
     .then(r => r.json())
     .then(geo => {
-        const rings = [];
-        for (const f of (geo.features || [])) {
-            const g = f.geometry;
-            if (!g) continue;
-            if (g.type === 'Polygon') {
-                for (const ring of g.coordinates) rings.push(ring);
-            } else if (g.type === 'MultiPolygon') {
-                for (const poly of g.coordinates) for (const ring of poly) rings.push(ring);
-            }
-        }
-        borderRings = rings;
-        if (earthData.length) applyHeatmap(earthData, currentTheme);
+        const features = geo.features || [];
+        world
+            .polygonsData(features)
+            .polygonCapColor(() => 'rgba(0, 0, 0, 0)')
+            .polygonSideColor(() => 'rgba(0, 0, 0, 0)')
+            .polygonStrokeColor(() => 'rgba(255, 255, 255, 0.55)')
+            .polygonAltitude(() => 0.006)
+            .polygonsTransitionDuration(0);
     })
     .catch(err => console.warn('Could not load borders GeoJSON', err));
-
-function strokeBorderRings() {
-    const W = CANVAS_W, H = CANVAS_H;
-    for (const ring of borderRings) {
-        ctx.beginPath();
-        let prevX = null;
-        for (let i = 0; i < ring.length; i++) {
-            const x = ((ring[i][0] + 180) / 360) * W;
-            const y = ((90 - ring[i][1]) / 180) * H;
-            if (i === 0 || (prevX !== null && Math.abs(x - prevX) > W / 2)) {
-                // start, or antimeridian wrap: break the segment instead of streaking
-                ctx.moveTo(x, y);
-            } else {
-                ctx.lineTo(x, y);
-            }
-            prevX = x;
-        }
-        ctx.stroke();
-    }
-}
-
-function drawBorders() {
-    if (!borderRings) return;
-    ctx.save();
-    ctx.lineJoin = 'round';
-    ctx.lineCap = 'round';
-    // dark halo underneath for contrast on light areas
-    ctx.strokeStyle = 'rgba(0, 0, 0, 0.45)';
-    ctx.lineWidth = 2.6;
-    strokeBorderRings();
-    // crisp bright outline on top
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
-    ctx.lineWidth = 1.1;
-    strokeBorderRings();
-    ctx.restore();
-}
 
 // Binary search: largest index i with arr[i] <= v (clamped to valid range)
 function bracket(arr, v) {
@@ -287,9 +265,6 @@ function renderHeatmapCanvas(points, palette, withEarth) {
         ctx.drawImage(earthImg, 0, 0, CANVAS_W, CANVAS_H);
         ctx.restore();
     }
-
-    // Crisp country borders on top
-    drawBorders();
 }
 
 function applyHeatmap(points, palette) {
