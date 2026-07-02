@@ -8,8 +8,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
     <!-- FontAwesome -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <!-- Globe.gl and Three.js -->
-    <script src="https://unpkg.com/three"></script>
+    <!-- Globe.gl (bundles its own Three.js) -->
     <script src="https://unpkg.com/globe.gl"></script>
     <!-- Custom CSS -->
     <link rel="stylesheet" href="style.css">
@@ -20,7 +19,7 @@
     <div id="dashboard-panel">
         <div class="header">
             <h1><i class="fa-solid fa-earth-americas"></i> Thermal Earth</h1>
-            <span class="status-indicator"><span class="dot pulse"></span> Live</span>
+            <span class="status-indicator"><span class="dot pulse"></span> <span id="status-label">Live</span></span>
         </div>
         
         <div class="stats-grid">
@@ -57,8 +56,8 @@
                 </div>
             </div>
             <div class="interval-control">
-                <label>Interval (min): <span id="interval-display">5</span></label>
-                <input type="range" id="interval-slider" min="1" max="60" value="5">
+                <label>Interval (min): <span id="interval-display">15</span></label>
+                <input type="range" id="interval-slider" min="10" max="60" value="15">
             </div>
             <button id="force-update-btn"><i class="fa-solid fa-rotate"></i> Force Update</button>
         </div>
