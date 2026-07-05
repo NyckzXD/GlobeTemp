@@ -6,7 +6,7 @@ O resultado é um globo com rotação automática, paletas de cores intercambiá
 
 ---
 
-## ✨ Funcionalidades
+##  Funcionalidades
 
 - **Globo 3D interativo** com rotação automática (que pausa ao arrastar) e atmosfera colorida.
 - **Heatmap de temperatura** desenhado em um canvas equiretangular (2048×1024) e aplicado como textura sobre uma esfera levemente maior que o globo.
@@ -45,7 +45,7 @@ A cada requisição, o servidor devolve os pontos da grade, as estatísticas (mi
 
 ---
 
-## 🔌 API
+##  API
 
 O servidor expõe dois endpoints:
 
@@ -82,7 +82,7 @@ Resposta: `{ "status": "ok" }`
 
 ---
 
-## 🚀 Como executar
+##  Como executar
 
 **Pré-requisitos:** apenas Python 3 (o backend usa somente a biblioteca padrão — não há dependências externas).
 
@@ -100,7 +100,7 @@ A porta padrão é `5005` e pode ser alterada na constante `PORT` no topo de `se
 
 ---
 
-## 🎨 Personalização
+##  Personalização
 
 - **Resolução da grade**: ajuste o passo de 4 graus nos laços de `get_data()` (`server.py`) e na constante `STEP` de `renderHeatmapCanvas()` (`app.js`). Os dois valores precisam coincidir.
 - **Paletas de cores**: edite ou adicione novas paletas em `paletteDefs` (`app.js`); cada uma é uma lista de pontos `{ t, c }` (temperatura → RGB).
@@ -109,7 +109,7 @@ A porta padrão é `5005` e pode ser alterada na constante `PORT` no topo de `se
 
 ---
 
-## 🛠️ Tecnologias
+##  Tecnologias
 
 - **Python** (`http.server` / `socketserver`) — servidor e simulação
 - **globe.gl** — renderização do globo 3D
