@@ -1,4 +1,4 @@
-# 🌍 Thermal Earth — Globo 3D de Temperatura
+# GlobeTemp — Globo 3D de Temperatura
 
 Visualização interativa de um globo terrestre 3D com um heatmap de temperatura renderizado sobre a superfície do planeta. O projeto combina um backend em Python (que gera os dados e serve os arquivos) com um frontend em JavaScript baseado em [globe.gl](https://globe.gl/) e [Three.js](https://threejs.org/).
 
@@ -18,17 +18,6 @@ O resultado é um globo com rotação automática, paletas de cores intercambiá
 - **Controle de intervalo** de atualização (1 a 60 minutos) e botão de atualização forçada.
 
 ---
-
-## 🗂️ Estrutura do projeto
-
-```
-.
-├── server.py        # Backend em Python: simulação térmica + servidor HTTP
-└── static/
-    ├── index.html   # Estrutura da página e painel de controle
-    ├── style.css    # Estilo do painel, tooltip e componentes
-    └── app.js        # Lógica do globo, heatmap, tooltip e comunicação com a API
-```
 
 > O backend serve os arquivos estáticos a partir da pasta `static/`. Certifique-se de que `index.html`, `style.css` e `app.js` estejam dentro dela.
 
