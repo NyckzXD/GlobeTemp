@@ -9,7 +9,9 @@
     <!-- FontAwesome (ícones) -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- Globe.gl (já traz o próprio Three.js) -->
-    <script src="https://unpkg.com/globe.gl"></script>
+    <script src="https://unpkg.com/globe.gl@2.46.2/dist/globe.gl.min.js"
+            integrity="sha384-1uolMBZ25k3zJcNwCLEv49+L+m2dZudqAzsoSAJfQTzDCSBxJzrMuZ2dkp/5JKiT"
+            crossorigin="anonymous"></script>
     <!-- CSS personalizado -->
     <link rel="stylesheet" href="style.css">
 </head>
@@ -56,10 +58,10 @@
                 </div>
             </div>
             <div class="interval-control">
-                <label>Interval (min): <span id="interval-display">15</span></label>
-                <input type="range" id="interval-slider" min="10" max="60" value="15">
+                <label for="interval-slider">Interval (min): <span id="interval-display">90</span></label>
+                <input type="range" id="interval-slider" min="90" max="360" step="30" value="90">
             </div>
-            <button id="force-update-btn"><i class="fa-solid fa-rotate"></i> Force Update</button>
+            <button id="force-update-btn"><i class="fa-solid fa-rotate"></i> <span class="btn-label">Force Update</span></button>
         </div>
     </div>
     

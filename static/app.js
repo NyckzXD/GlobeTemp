@@ -1,16 +1,23 @@
 // Dados e estado
 let earthData = [];
-let simInterval = 15;
+let simInterval = 90;
 let currentTheme = 'thermal';
-let lastUpdate = Date.now();
-let nextUpdate = Date.now() + simInterval * 60 * 1000;
+let lastUpdate = 0;
+let renderedUpdate = null;   // last_update da textura atual (evita re-renderizar à toa)
+let nextUpdate = Date.now();
 let countdownIntervalId = null;
+
+// Intervalo mínimo entre buscas, mesmo que o servidor anuncie um prazo no passado
+const MIN_REFETCH_MS = 10 * 1000;
+const RETRY_ON_ERROR_MS = 15 * 1000;
+const FORCE_POLL_MS = 3 * 1000;
+const FORCE_POLL_TIMEOUT_MS = 90 * 1000;
 
 // Inicializa o globo - base mínima e limpa
 const world = Globe()
     (document.getElementById('globe-container'))
-    .globeImageUrl('https://unpkg.com/three-globe/example/img/earth-dark.jpg')
-    .bumpImageUrl('https://unpkg.com/three-globe/example/img/earth-topology.png')
+    .globeImageUrl('https://unpkg.com/three-globe@2.45.6/example/img/earth-dark.jpg')
+    .bumpImageUrl('https://unpkg.com/three-globe@2.45.6/example/img/earth-topology.png')
     .backgroundColor('#000000')
     .showAtmosphere(true)
     .atmosphereColor('#1a3a6b')
@@ -150,10 +157,10 @@ earthImg.onload = () => {
     if (earthData.length) applyHeatmap(earthData, currentTheme);
 };
 earthImg.onerror = () => { earthImgLoaded = false; };
-earthImg.src = 'https://unpkg.com/three-globe/example/img/earth-dark.jpg';
+earthImg.src = 'https://unpkg.com/three-globe@2.45.6/example/img/earth-dark.jpg';
 
 // Fronteiras dos países como contornos vetoriais 3D nítidos (não pixelizam no zoom)
-const BORDERS_URL = 'https://raw.githubusercontent.com/vasturiano/globe.gl/master/example/datasets/ne_110m_admin_0_countries.geojson';
+const BORDERS_URL = 'https://cdn.jsdelivr.net/gh/vasturiano/globe.gl@v2.46.2/example/datasets/ne_110m_admin_0_countries.geojson';
 
 fetch(BORDERS_URL)
     .then(r => r.json())
@@ -341,48 +348,94 @@ document.getElementById('globe-container').addEventListener('mouseleave', () => 
 
 // ─── Busca e atualização ──────────────────────────────────────────────────────
 
+function setStatus(text) {
+    const statusLabel = document.getElementById('status-label');
+    if (statusLabel) statusLabel.textContent = text;
+}
+
 async function fetchData() {
+    let data;
     try {
-        const icon = document.querySelector('.fa-rotate');
-        if (icon) icon.classList.add('loading');
-
         const response = await fetch('/api/data');
-        const data = await response.json();
-
-        earthData   = data.points;
-        simInterval = data.interval;
-        lastUpdate  = data.last_update * 1000;
-        nextUpdate  = (data.next_update ? data.next_update * 1000
-                                        : lastUpdate + simInterval * 60 * 1000);
-
-        applyHeatmap(earthData, currentTheme);
-
-        const statusLabel = document.getElementById('status-label');
-        if (statusLabel) statusLabel.textContent = (data.source === 'open-meteo') ? 'Live' : 'Sim';
-
-        document.getElementById('min-temp').textContent = `${data.stats.min}°C`;
-        document.getElementById('avg-temp').textContent = `${data.stats.avg}°C`;
-        document.getElementById('max-temp').textContent = `${data.stats.max}°C`;
-        document.getElementById('interval-slider').value = simInterval;
-        document.getElementById('interval-display').textContent = simInterval;
-
-        if (icon) setTimeout(() => icon.classList.remove('loading'), 800);
-        startCountdown();
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        data = await response.json();
     } catch (err) {
         console.error('Failed to fetch data', err);
+        setStatus('Offline');
+        nextUpdate = Date.now() + RETRY_ON_ERROR_MS;
+        startCountdown();
+        return null;
     }
+
+    earthData   = data.points;
+    simInterval = data.interval;
+    lastUpdate  = data.last_update * 1000;
+    // Nunca agenda a próxima busca para "agora": é o que causava o loop de requisições
+    nextUpdate  = Math.max(data.next_update * 1000, Date.now() + MIN_REFETCH_MS);
+
+    if (renderedUpdate !== data.last_update) {
+        applyHeatmap(earthData, currentTheme);
+        renderedUpdate = data.last_update;
+    }
+
+    setStatus(data.refreshing ? 'Updating' : (data.source === 'open-meteo') ? 'Live' : 'Sim');
+
+    document.getElementById('min-temp').textContent = `${data.stats.min}°C`;
+    document.getElementById('avg-temp').textContent = `${data.stats.avg}°C`;
+    document.getElementById('max-temp').textContent = `${data.stats.max}°C`;
+    const slider = document.getElementById('interval-slider');
+    slider.min = data.interval_min;
+    slider.max = data.interval_max;
+    slider.value = simInterval;
+    document.getElementById('interval-display').textContent = simInterval;
+
+    startCountdown();
+    return data;
 }
 
 async function updateSettings(settings) {
+    const response = await fetch('/api/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(settings)
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
+    return result;
+}
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// Pede a atualização e espera o servidor terminar de buscar os dados novos
+async function forceUpdate() {
+    const btn = document.getElementById('force-update-btn');
+    const icon = btn.querySelector('.fa-rotate');
+    const label = btn.querySelector('.btn-label');
+    btn.disabled = true;
+    icon.classList.add('loading');
     try {
-        await fetch('/api/settings', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(settings)
-        });
-        if (settings.action === 'force_update') fetchData();
+        const result = await updateSettings({ action: 'force_update' });
+        if (result.refresh === 'cooldown') {
+            const m = Math.floor(result.retry_after / 60);
+            const s = String(result.retry_after % 60).padStart(2, '0');
+            label.textContent = `Try again in ${m}:${s}`;
+            await sleep(3000);
+            return;
+        }
+        const before = lastUpdate;
+        const deadline = Date.now() + FORCE_POLL_TIMEOUT_MS;
+        setStatus('Updating');
+        while (Date.now() < deadline) {
+            await sleep(FORCE_POLL_MS);
+            const data = await fetchData();
+            if (data && !data.refreshing && data.last_update * 1000 !== before) break;
+        }
     } catch (err) {
-        console.error('Failed to update settings', err);
+        console.error('Failed to force update', err);
+    } finally {
+        label.textContent = 'Force Update';
+        icon.classList.remove('loading');
+        btn.disabled = false;
     }
 }
 
@@ -427,15 +480,15 @@ document.getElementById('theme-selector').addEventListener('change', (e) => {
 document.getElementById('interval-slider').addEventListener('input', (e) => {
     document.getElementById('interval-display').textContent = e.target.value;
 });
-document.getElementById('interval-slider').addEventListener('change', (e) => {
-    const v = parseInt(e.target.value);
-    updateSettings({ interval: v });
-    simInterval = v;
-    startCountdown();
+document.getElementById('interval-slider').addEventListener('change', async (e) => {
+    try {
+        await updateSettings({ interval: parseInt(e.target.value, 10) });
+    } catch (err) {
+        console.error('Failed to update interval', err);
+    }
+    fetchData();  // usa o intervalo efetivo devolvido pelo servidor
 });
-document.getElementById('force-update-btn').addEventListener('click', () => {
-    updateSettings({ action: 'force_update' });
-});
+document.getElementById('force-update-btn').addEventListener('click', forceUpdate);
 
 window.addEventListener('resize', () => {
     world.width(window.innerWidth);
