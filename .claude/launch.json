@@ -1,0 +1,13 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "globetemp",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "globetemp"],
+      "env": { "GLOBETEMP_PORT": "5006", "GLOBETEMP_CACHE": "./.claude/cache.json" },
+      "port": 5006,
+      "autoPort": false
+    }
+  ]
+}

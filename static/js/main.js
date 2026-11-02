@@ -1,11 +1,13 @@
 import { getData, postSettings } from './api.js';
 import { FORCE_POLL_MS, FORCE_POLL_TIMEOUT_MS, MIN_REFETCH_MS, RETRY_ON_ERROR_MS } from './config.js';
-import { createGlobe, loadBorders } from './globe.js';
+import { createGlobe, loadCoastlines } from './globe.js';
+import { buildGrid } from './grid.js';
 import { createHeatmapLayer } from './heatmap.js';
 import { DEFAULT_PALETTE, PALETTES } from './palettes.js';
 import { fillPaletteSelect, renderLegend } from './ui/legend.js';
 import { initPanel } from './ui/panel.js';
 import { setStatus, statusFor, updateObservedAt, updateStats } from './ui/status.js';
+import { initTimeline } from './ui/timeline.js';
 import { initTooltip } from './ui/tooltip.js';
 
 const PALETTE_KEY = 'globetemp.palette';
@@ -13,7 +15,8 @@ const PALETTE_KEY = 'globetemp.palette';
 // ─── Estado ───────────────────────────────────────────────────────────────────
 const state = {
     palette: DEFAULT_PALETTE,
-    interval: 90,
+    interval: 360,
+    stats: [],             // estatísticas por horário da série
     lastUpdate: 0,         // ms
     renderedUpdate: null,  // last_update da textura atual (evita re-renderizar à toa)
     nextUpdate: Date.now(),
@@ -29,8 +32,14 @@ try {
 const container = document.getElementById('globe-container');
 const world = createGlobe(container);
 const heatmap = createHeatmapLayer(world);
-loadBorders(world);
-initTooltip(world, container, () => heatmap.grid, () => state.palette);
+loadCoastlines(world);
+const timeline = initTimeline((t) => {
+    heatmap.setTime(t);
+    // Estatísticas do horário mais próximo do que está na tela
+    const stats = state.stats[Math.round(t)];
+    if (stats) updateStats(stats);
+});
+initTooltip(world, container, () => heatmap.grid, () => timeline.t, () => state.palette);
 initPanel();
 
 // ─── Busca e atualização ──────────────────────────────────────────────────────
@@ -52,13 +61,15 @@ async function refresh() {
     state.nextUpdate = Math.max(data.next_update * 1000, Date.now() + MIN_REFETCH_MS);
 
     if (state.renderedUpdate !== data.last_update) {
-        heatmap.setPoints(data.points, state.palette);
+        state.stats = data.stats;
+        const grid = buildGrid(data.grid);
+        heatmap.setGrid(grid);
+        timeline.setGrid(grid);  // também atualiza o horário e as estatísticas na tela
         state.renderedUpdate = data.last_update;
     }
 
     setStatus(statusFor(data));
     updateObservedAt(data);
-    updateStats(data.stats);
 
     const slider = document.getElementById('interval-slider');
     slider.min = data.interval_min;

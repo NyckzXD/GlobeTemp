@@ -29,15 +29,23 @@ class Grid:
         self.coords = [(la, ln) for la in self.lats for ln in self.lngs]
         self.unique_coords = sorted({canonical(la, ln) for la, ln in self.coords})
 
-    def synthetic(self):
-        return {coord: latitude_estimate(coord[0]) for coord in self.unique_coords}
+    def synthetic(self, n_frames=1):
+        """Série constante com a estimativa por latitude (`n_frames` horários)."""
+        return {coord: [latitude_estimate(coord[0])] * n_frames for coord in self.unique_coords}
 
-    def points(self, temps):
-        """Expande `temps` (por localização única) para a lista de pontos da grade completa."""
-        return [
-            {'lat': lat, 'lng': lng, 'temp': round(float(temps[canonical(lat, lng)]), 2)}
-            for (lat, lng) in self.coords
-        ]
+    def payload(self, times, series):
+        """Grade completa para o cliente: eixos + um vetor por horário.
+
+        `series` tem uma lista de temperaturas (alinhada com `times`) por localização única.
+        `values[k]` é a grade do horário k em ordem lat-major (sul -> norte, oeste -> leste).
+        """
+        full = [series[canonical(la, ln)] for la, ln in self.coords]
+        return {
+            'lats': self.lats,
+            'lngs': self.lngs,
+            'times': times,
+            'values': [[round(float(s[k]), 1) for s in full] for k in range(len(times))],
+        }
 
     def stats(self, temps):
         """Mínimo, máximo e média ponderada por área (cos da latitude).
@@ -48,3 +56,7 @@ class Grid:
         weights = [math.cos(math.radians(lat)) for lat, _ in self.unique_coords]
         avg = sum(v * w for v, w in zip(values, weights, strict=True)) / sum(weights)
         return {'min': round(min(values), 1), 'max': round(max(values), 1), 'avg': round(avg, 1)}
+
+    def stats_series(self, times, series):
+        """`stats` de cada horário da série."""
+        return [self.stats({c: s[k] for c, s in series.items()}) for k in range(len(times))]

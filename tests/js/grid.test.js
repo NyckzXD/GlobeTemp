@@ -1,61 +1,77 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { bracket, buildGrid, colorize, interpolateField, sampleTemp } from '../../static/js/grid.js';
-import { getLUT, lutIndex } from '../../static/js/palettes.js';
+import { buildGrid, cubicWeights, frameAt, packFrames, sampleTemp } from '../../static/js/grid.js';
 
-// Grade 3 x 3 em que temp = lat + lng/10 (bilinear reproduz funções lineares exatamente)
-const LATS = [-90, 0, 90];
-const LNGS = [-180, 0, 180];
-const f = (lat, lng) => lat + lng / 10;
-const points = LATS.flatMap((lat) => LNGS.map((lng) => ({ lat, lng, temp: f(lat, lng) })));
-const grid = buildGrid(points);
+// Grade de 30° como a do servidor (polos e ±180° inclusos), dois horários
+const LATS = [-90, -60, -30, 0, 30, 60, 90];
+const LNGS = Array.from({ length: 13 }, (_, i) => -180 + i * 30);
+const TIMES = ['2026-11-02T17:00', '2026-11-02T18:00'];
+const H0 = Date.parse('2026-11-02T17:00Z');
 
-test('bracket encontra o intervalo e limita às pontas', () => {
-    const arr = [-90, -30, 30, 90];
-    assert.equal(bracket(arr, -100), 0);
-    assert.equal(bracket(arr, -30), 1);
-    assert.equal(bracket(arr, 0), 1);
-    assert.equal(bracket(arr, 90), 3);
-    assert.equal(bracket(arr, 200), 3);
+function makeGrid(fns) {
+    return buildGrid({
+        lats: LATS,
+        lngs: LNGS,
+        times: TIMES.slice(0, fns.length),
+        values: fns.map((f) => LATS.flatMap((lat) => LNGS.map((lng) => f(lat, lng))))
+    });
+}
+
+const near = (a, b, eps = 1e-4) => assert.ok(Math.abs(a - b) < eps, `${a} ≉ ${b}`);
+
+test('buildGrid deriva eixos, passo e horários em ms', () => {
+    const g = makeGrid([() => 0]);
+    assert.equal(g.step, 30);
+    assert.equal(g.nLat, 7);
+    assert.equal(g.nLng, 13);
+    assert.deepEqual(g.times, [H0]);
+    assert.equal(g.frames[0].length, 7 * 13);
 });
 
-test('buildGrid ordena os eixos independentemente da ordem dos pontos', () => {
-    const g = buildGrid([...points].reverse());
-    assert.deepEqual(g.lats, LATS);
-    assert.deepEqual(g.lngs, LNGS);
-    assert.equal(g.T[2][0], f(90, -180));
+test('pesos de Catmull-Rom somam 1 e passam pelos nós', () => {
+    for (const t of [0, 0.25, 0.5, 0.9]) near(cubicWeights(t).reduce((a, b) => a + b), 1);
+    cubicWeights(0).forEach((w, i) => near(w, i === 1 ? 1 : 0));
 });
 
 test('sampleTemp devolve os valores da grade nos nós', () => {
-    for (const p of points) assert.ok(Math.abs(sampleTemp(grid, p.lat, p.lng) - p.temp) < 1e-4);
+    const f = (lat, lng) => Math.sin(lat / 20) * 10 + Math.cos(lng / 40) * 5;
+    const g = makeGrid([f]);
+    for (const lat of LATS) for (const lng of LNGS) near(sampleTemp(g, lat, lng), f(lat, lng));
 });
 
-test('sampleTemp interpola entre os nós', () => {
-    for (const [lat, lng] of [[45, 90], [-12.5, -33], [80, 170]]) {
-        assert.ok(Math.abs(sampleTemp(grid, lat, lng) - f(lat, lng)) < 1e-4, `${lat},${lng}`);
-    }
+test('sampleTemp reproduz funções lineares na latitude (longe dos polos)', () => {
+    const g = makeGrid([(lat) => lat / 2]);
+    for (const lat of [-45, -12.5, 7, 44]) near(sampleTemp(g, lat, 33), lat / 2);
 });
 
-test('interpolateField bate com sampleTemp no centro de cada pixel', () => {
-    const w = 8, h = 4;
-    const field = interpolateField(grid, w, h);
-    assert.equal(field.length, w * h);
-    for (let py = 0; py < h; py++) {
-        for (let px = 0; px < w; px++) {
-            const lat = 90 - ((py + 0.5) / h) * 180;
-            const lng = -180 + ((px + 0.5) / w) * 360;
-            assert.ok(Math.abs(field[py * w + px] - sampleTemp(grid, lat, lng)) < 1e-3);
-        }
-    }
+test('a longitude dá a volta em ±180° sem costura', () => {
+    const f = (lat, lng) => Math.cos((lng * Math.PI) / 180) * 10;
+    const g = makeGrid([f]);
+    near(sampleTemp(g, 10, 179.9), sampleTemp(g, 10, -180.1), 1e-2);
+    near(sampleTemp(g, 10, 540), sampleTemp(g, 10, 180));
 });
 
-test('colorize pinta cada pixel com a cor da LUT e alfa opaco', () => {
-    const field = Float32Array.from([-40, 0, 25, 50]);
-    const rgba = colorize(field, 'viridis', new Uint8ClampedArray(16));
-    const lut = getLUT('viridis');
-    field.forEach((t, i) => {
-        const k = lutIndex(t) * 3;
-        assert.deepEqual([...rgba.slice(i * 4, i * 4 + 4)], [lut[k], lut[k + 1], lut[k + 2], 255]);
-    });
+test('t fracionário mistura dois horários linearmente', () => {
+    const g = makeGrid([() => 10, () => 20]);
+    near(sampleTemp(g, 0, 0, 0), 10);
+    near(sampleTemp(g, 0, 0, 0.25), 12.5);
+    near(sampleTemp(g, 0, 0, 1), 20);
+    near(sampleTemp(g, 0, 0, 5), 20);  // satura no último horário
+});
+
+test('frameAt converte instante em posição na série e satura nas pontas', () => {
+    const g = makeGrid([() => 0, () => 0]);
+    assert.equal(frameAt(g, H0 - 1e6), 0);
+    near(frameAt(g, H0 + 30 * 60 * 1000), 0.5);
+    assert.equal(frameAt(g, H0 + 1e9), 1);
+});
+
+test('packFrames empilha os horários em linhas da textura', () => {
+    const g = makeGrid([() => 1, () => 2]);
+    const data = packFrames(g);
+    const size = g.nLat * g.nLng;
+    assert.equal(data.length, size * 2);
+    assert.equal(data[size - 1], 1);
+    assert.equal(data[size], 2);
 });

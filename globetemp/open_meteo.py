@@ -6,15 +6,18 @@ from . import config
 
 
 def fetch_chunk(chunk):
-    """Temperatura atual a 2 m de um lote de localizações.
+    """Série horária da temperatura a 2 m de um lote de localizações.
 
-    Devolve uma lista de (temperatura, horário observado em UTC) na mesma ordem de `chunk`;
-    qualquer um dos dois pode ser None. Erros HTTP sobem como `urllib.error.HTTPError`.
+    Devolve, na mesma ordem de `chunk`, um dict {horário UTC ISO: temperatura} por
+    localização (vazio se a resposta não trouxe nada; a temperatura pode ser None).
+    Erros HTTP sobem como `urllib.error.HTTPError`.
     """
     params = {
         'latitude': ','.join(str(la) for la, _ in chunk),
         'longitude': ','.join(str(ln) for _, ln in chunk),
-        'current': 'temperature_2m',
+        'hourly': 'temperature_2m',
+        'past_hours': config.PAST_HOURS,
+        'forecast_hours': config.FORECAST_HOURS,
         'timezone': 'UTC',
     }
     url = config.OPEN_METEO_URL + '?' + urllib.parse.urlencode(params)
@@ -27,8 +30,8 @@ def fetch_chunk(chunk):
         body = [body]
     out = []
     for item in body:
-        current = (item or {}).get('current') or {}
-        out.append((current.get('temperature_2m'), current.get('time')))
+        hourly = (item or {}).get('hourly') or {}
+        out.append(dict(zip(hourly.get('time') or [], hourly.get('temperature_2m') or [], strict=False)))
     return out
 
 

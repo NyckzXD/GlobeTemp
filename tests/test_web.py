@@ -36,7 +36,7 @@ def test_get_data(client):
     resp, data = client('GET', '/api/data')
     assert resp.status == 200
     assert resp.getheader('Cache-Control') == 'no-store'
-    assert len(json.loads(data)['points']) == 496
+    assert len(json.loads(data)['grid']['values'][0]) == 1891
 
 
 def test_static_files_and_js_mime_type(client):
@@ -51,7 +51,7 @@ def test_static_files_and_js_mime_type(client):
 
 
 def test_interval_setting(client):
-    assert post_json(client, {'interval': 15}) == (200, {'status': 'ok', 'interval': 90})
+    assert post_json(client, {'interval': 15}) == (200, {'status': 'ok', 'interval': 360})
 
 
 def test_force_update_then_cooldown(client):

@@ -1,19 +1,20 @@
 # GlobeTemp — Globo 3D de Temperatura
 
-Globo terrestre 3D interativo com um mapa de calor da **temperatura real do ar a 2 m**, obtida do [Open-Meteo](https://open-meteo.com/). O backend em Python (só biblioteca padrão) busca e guarda os dados; o frontend em JavaScript, com [globe.gl](https://globe.gl/) / [Three.js](https://threejs.org/), interpola a grade e pinta a textura do planeta.
+Globo terrestre 3D interativo com um mapa de calor da **temperatura do ar a 2 m** (série horária do [Open-Meteo](https://open-meteo.com/)), no estilo do [earth.nullschool.net](https://earth.nullschool.net/). O backend em Python (só biblioteca padrão) busca e guarda os dados; o frontend em JavaScript, com [globe.gl](https://globe.gl/) / [Three.js](https://threejs.org/), interpola a grade num shader e pinta a superfície do planeta.
 
 ---
 
 ## Funcionalidades
 
-- **Globo 3D** com rotação automática (para ao arrastar), relevo, fronteiras dos países e atmosfera colorida.
-- **Mapa de calor** gerado num canvas equiretangular (2048×1024) por interpolação bilinear da grade e aplicado como textura do globo.
+- **Globo 3D** com rotação automática (para ao arrastar), cor chapada, linhas de costa nítidas (Natural Earth 1:50m), fronteiras discretas e atmosfera colorida.
+- **Mapa de calor na GPU**: a grade (6°) vai para uma textura de floats e o shader da superfície faz interpolação **bicúbica** (Catmull-Rom) por fragmento. Fica nítido em qualquer zoom, e trocar a paleta ou o horário é instantâneo.
+- **Linha do tempo**: a série horária vai de 6 h atrás até 24 h à frente. Por padrão o globo acompanha o relógio (mistura suave entre as horas). Dá para arrastar o slider, tocar a animação ou voltar para **Now**.
 - **5 escalas de cor** com **legenda** de -40 °C a 50 °C: Thermal (divergente, centrada em 0 °C), Viridis, Cividis (segura para daltonismo), Plasma e Magma. A escolha fica salva no navegador.
-- **Tooltip** com a temperatura interpolada sob o cursor (o mesmo valor que o mapa pinta) e as coordenadas. No celular, toque sem arrastar.
-- **Estatísticas**: mínimo, máximo e média global **ponderada por área**.
+- **Tooltip** com a temperatura interpolada sob o cursor, no horário exibido (o mesmo valor que o shader pinta), e as coordenadas. No celular, toque sem arrastar.
+- **Estatísticas** do horário exibido: mínimo, máximo e média global **ponderada por área**.
 - **Indicador de estado**: `Live`, `Updating`, `Retrying`, `Stale`, `Estimated`, `Offline`.
-- **Horário da observação** e crédito ao Open-Meteo no rodapé do painel.
-- **Atualização** automática (90–360 min) com contagem regressiva e botão **Force Update** (cooldown de 10 min).
+- **Horário da busca** e crédito ao Open-Meteo no rodapé do painel.
+- **Atualização** automática (6–12 h) com contagem regressiva e botão **Force Update** (cooldown de 10 min e teto diário de cota).
 - **Painel recolhível**, que vira uma folha na parte de baixo da tela no celular.
 - **Acessibilidade**: foco visível no teclado, rótulos nos controles e menos movimento (sem rotação automática nem animações) para quem ativa `prefers-reduced-motion`.
 
@@ -31,7 +32,7 @@ python -m globetemp
 
 Abra <http://localhost:5005>.
 
-Nos primeiros segundos o globo mostra uma **estimativa por latitude** (estado `Estimated`). Assim que a primeira busca ao Open-Meteo termina, os dados reais substituem a estimativa e ficam salvos em `cache.json`. Ao reiniciar, o servidor usa esse cache e só busca de novo quando o intervalo vence.
+Nos primeiros minutos (uma rodada leva uns 3,5 min) o globo mostra uma **estimativa por latitude** (estado `Estimated`). Assim que a primeira busca ao Open-Meteo termina, os dados reais substituem a estimativa e ficam salvos em `cache.json`. Ao reiniciar, o servidor usa esse cache e só busca de novo quando o intervalo vence.
 
 ### Variáveis de ambiente
 
@@ -50,9 +51,12 @@ Nos primeiros segundos o globo mostra uma **estimativa por latitude** (estado `E
 
 O plano gratuito do Open-Meteo é limitado por **número de localizações** (~600/min, ~10.000/dia), não por número de requisições. Por isso:
 
-- A grade tem **12°** de passo: 16 latitudes × 31 longitudes = 496 pontos. Polos e o meridiano ±180° são o mesmo lugar físico, então só **422 localizações únicas** são consultadas e o resto é copiado.
-- As consultas vão em lotes de 100 localizações.
-- O intervalo mínimo é **90 min**: 422 × 16 atualizações/dia ≈ 6.750 localizações/dia.
+- A grade tem **6°** de passo: 31 latitudes × 61 longitudes = 1.891 pontos. Polos e o meridiano ±180° são o mesmo lugar físico, então só **1.742 localizações únicas** são consultadas e o resto é copiado.
+- Cada localização traz a **série horária** (`past_hours=6`, `forecast_hours=25`) numa só consulta. Como a série cobre o intervalo inteiro, o globo continua "ao vivo" entre as rodadas sem gastar cota.
+- As consultas vão em lotes de 100 localizações, uma a cada 12 s (≈ 500/min, abaixo do limite de 600/min). Uma rodada leva uns 3,5 min.
+- O intervalo mínimo é **6 h**: 1.742 × 4 atualizações/dia ≈ 7.000 localizações/dia.
+- Um **teto de 9.000 localizações em 24 h** segura atualizações forçadas e agendadas que passariam da cota. Cada lote consultado (mesmo de uma rodada que falhou) é gravado em `cache-usage.json`, ao lado do cache, então reiniciar o servidor não zera a contagem.
+- Se lotes de uma rodada chegarem em horas diferentes, só ficam os horários que todas as localizações trouxeram.
 - Se uma rodada falhar no meio, os lotes já baixados são reaproveitados na próxima tentativa (por até 30 min).
 - Erros usam **backoff exponencial** (30 s → 1 min → … → 30 min). Um `429` espera pelo menos 5 min, ou o `Retry-After` se for maior.
 
@@ -71,26 +75,27 @@ static/
   js/
     main.js           liga tudo: estado, agendamento das buscas, controles
     palettes.js       escalas de cor e tabela de cores (puro, testado no Node)
-    grid.js           grade, interpolação bilinear, coloração (puro, testado no Node)
-    heatmap.js        canvas → textura do globo
-    globe.js          configuração do globe.gl e fronteiras
+    grid.js           grade horária, interpolação bicúbica e no tempo (puro, testado no Node)
+    heatmap.js        shader da superfície: grade em textura de floats + paleta
+    globe.js          configuração do globe.gl, linhas de costa e fronteiras
+    topology.js       leitura mínima de TopoJSON (puro, testado no Node)
     api.js, config.js
-    ui/               tooltip, legenda, painel, status
+    ui/               tooltip, legenda, painel, status, linha do tempo
 tests/                pytest (backend) e tests/js (node:test)
 ```
 
 ### Backend
 
-- `TemperatureService` mantém a grade, as estatísticas e uma thread em segundo plano que decide quando buscar (intervalo vencido, atualização forçada ou ainda sem dado real).
+- `TemperatureService` mantém a série horária, as estatísticas de cada horário e uma thread em segundo plano que decide quando buscar (intervalo vencido, atualização forçada ou ainda sem dado real), respeitando o teto diário de cota.
 - A média global é ponderada por `cos(latitude)`, porque cada ponto de uma grade equiretangular cobre menos área perto dos polos.
 - Servidor `ThreadingHTTPServer`. A API não é cacheada; os arquivos estáticos são revalidados.
 
 ### Frontend
 
-1. Busca `/api/data` e monta a grade `lat × lng`.
-2. Interpola o campo de temperatura de cada pixel do canvas (bilinear, `grid.js`) e o colore com a tabela pré-calculada da paleta ativa. Trocar de paleta só refaz a coloração.
-3. Mistura uma textura sutil da Terra para os continentes continuarem reconhecíveis e atualiza a textura do globo direto a partir do canvas (sem `toDataURL`).
-4. O tooltip usa a mesma interpolação (`sampleTemp`), então o número sempre bate com a cor.
+1. Busca `/api/data` e monta a grade `lat × lng` de cada horário.
+2. Empilha todos os horários numa textura de floats (`R32F`) e a paleta numa textura de 512×1. O material Phong do globo recebe, via `onBeforeCompile`, um trecho de shader que calcula lat/lng do fragmento, faz a bicúbica nos dois horários vizinhos, mistura e consulta a paleta. O globe.gl não exporta o Three.js, então os construtores necessários vêm de objetos que ele já criou.
+3. As linhas de costa e as fronteiras saem do TopoJSON do `world-atlas` (arco de um só país = costa; compartilhado = fronteira) e viram duas geometrias de linhas (dois draw calls).
+4. O tooltip usa a mesma interpolação (`sampleTemp` em `grid.js`), então o número sempre bate com a cor.
 5. Agenda a próxima busca para o `next_update` do servidor, com um mínimo de 10 s entre buscas e nova tentativa a cada 15 s se o servidor não responder.
 
 ---
@@ -101,22 +106,27 @@ tests/                pytest (backend) e tests/js (node:test)
 
 ```json
 {
-  "points": [ { "lat": -90, "lng": -180, "temp": -28.4 }, ... ],
-  "stats": { "min": -51.7, "max": 36.6, "avg": 15.1 },
-  "interval": 90,
-  "interval_min": 90,
-  "interval_max": 360,
+  "grid": {
+    "lats": [-90, -84, ..., 90],
+    "lngs": [-180, -174, ..., 180],
+    "times": ["2026-11-02T12:00", "2026-11-02T13:00", ...],
+    "values": [[-28.4, -28.4, ...], ...]
+  },
+  "stats": [{ "min": -51.7, "max": 36.6, "avg": 15.1 }, ...],
+  "interval": 360,
+  "interval_min": 360,
+  "interval_max": 720,
   "last_update": 1793640000.0,
-  "observed_at": "2026-11-02T17:30Z",
-  "next_update": 1793645400.0,
+  "next_update": 1793661600.0,
   "refreshing": false,
   "retrying": false,
   "source": "open-meteo"
 }
 ```
 
+- `grid.times`: horários UTC da série. `grid.values[k]` é a grade do horário k em ordem lat-major (sul → norte, oeste → leste), com as bordas ±180° e os polos repetidos.
+- `stats[k]`: estatísticas do horário k.
 - `last_update`: quando o servidor obteve os dados (epoch, segundos).
-- `observed_at`: horário da observação informado pelo Open-Meteo (UTC). É `null` enquanto a fonte for a estimativa.
 - `source`: `open-meteo` ou `synthetic` (estimativa por latitude).
 - `next_update`: nunca está no passado; o cliente pode agendar a próxima busca direto por ele.
 
@@ -126,13 +136,13 @@ Corpo JSON (`Content-Type: application/json`, máx. 1 KB):
 
 | Campo | Tipo | Descrição |
 |---|---|---|
-| `interval` | número | Intervalo de atualização em minutos, limitado a 90–360. |
-| `action` | `"force_update"` | Pede uma busca imediata (cooldown de 10 min). |
+| `interval` | número | Intervalo de atualização em minutos, limitado a 360–720. |
+| `action` | `"force_update"` | Pede uma busca imediata (cooldown de 10 min, e só se a rodada couber no teto diário de cota). |
 
 Resposta:
 
 ```json
-{ "status": "ok", "interval": 120, "refresh": "queued", "retry_after": 600 }
+{ "status": "ok", "interval": 480, "refresh": "queued", "retry_after": 600 }
 ```
 
 `refresh` é `"queued"` ou `"cooldown"`, e `retry_after` diz em quantos segundos um novo pedido será aceito. Erros de validação respondem `400`/`411`/`413`/`415` com `{ "error": "..." }`.

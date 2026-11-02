@@ -11,9 +11,11 @@ from globetemp.service import TemperatureService  # noqa: E402
 class FakeOpenMeteo:
     """Substitui `open_meteo.fetch_chunk`: devolve temperaturas previsíveis e pode falhar."""
 
-    def __init__(self, observed='2026-11-02T17:30'):
+    TIMES = ('2026-11-02T17:00', '2026-11-02T18:00', '2026-11-02T19:00')
+
+    def __init__(self, times=TIMES):
         self.calls = []
-        self.observed = observed
+        self.times = times
         self.fail_on = {}  # número da chamada (1-based) -> exceção
 
     def __call__(self, chunk):
@@ -21,7 +23,7 @@ class FakeOpenMeteo:
         err = self.fail_on.get(len(self.calls))
         if err is not None:
             raise err
-        return [(20.0 + lat / 10, self.observed) for lat, _ in chunk]
+        return [{t: 20.0 + lat / 10 + k for k, t in enumerate(self.times)} for lat, _ in chunk]
 
 
 @pytest.fixture
