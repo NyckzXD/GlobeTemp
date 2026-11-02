@@ -3,6 +3,7 @@ import logging
 import math
 import threading
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from urllib.error import HTTPError
 
@@ -11,9 +12,17 @@ from .grid import Grid, latitude_estimate
 
 log = logging.getLogger('globetemp')
 
+DAY = 86400
+
+
+def current_hour_iso(now=None):
+    """Hora cheia em UTC, no formato do Open-Meteo (`2026-11-02T17:00`)."""
+    dt = datetime.fromtimestamp(time.time() if now is None else now, tz=timezone.utc)
+    return dt.strftime('%Y-%m-%dT%H:00')
+
 
 class TemperatureService:
-    """Mantém a última grade de temperatura e decide quando buscar dados novos.
+    """Mantém a última série horária de temperatura e decide quando buscar dados novos.
 
     Uma thread em segundo plano busca no Open-Meteo quando o intervalo vence, quando uma
     atualização é forçada ou enquanto ainda não houver dado real. O resultado fica em
@@ -40,20 +49,20 @@ class TemperatureService:
         self._failures = 0
         self._force = False
         self._last_forced = 0.0
-        self._partial = {}  # localização -> (temp, horário observado)
+        self._partial = {}  # localização -> {horário: temperatura}
         self._partial_started = 0.0
+        self._usage = []  # (instante, localizações consultadas), só das últimas 24 h
         self.refreshing = False
 
-        self._points = []
-        self._stats = {'min': 0, 'max': 0, 'avg': 0}
+        self._grid_payload = None
+        self._stats = []
         self.source = 'synthetic'
         self.last_update = time.time()
-        self.observed_at = None
 
         # Usa o cache em disco se houver; senão, preenchimento sintético imediato para a
         # UI já ter dados no primeiro carregamento.
         if not self._load_cache():
-            self._apply(self.grid.synthetic(), 'synthetic')
+            self._apply([current_hour_iso()], self.grid.synthetic(), 'synthetic')
 
         # Os dados reais são buscados em segundo plano para o servidor subir na hora.
         if start:
@@ -65,16 +74,14 @@ class TemperatureService:
             return False
         try:
             saved = json.loads(self.cache_file.read_text(encoding='utf-8'))
-            temps = {(la, ln): t for la, ln, t in saved['temps']}
-            if set(temps) != set(self.grid.unique_coords):
+            times = list(saved['times'])
+            series = {(la, ln): list(s) for la, ln, s in saved['temps']}
+            if set(series) != set(self.grid.unique_coords):
                 log.info('Cache ignorado: a grade mudou desde que foi salvo.')
                 return False
-            self._apply(
-                temps,
-                'open-meteo',
-                updated_at=float(saved['last_update']),
-                observed_at=saved.get('observed_at'),
-            )
+            if not times or any(len(s) != len(times) for s in series.values()):
+                raise ValueError('séries de tamanho diferente dos horários')
+            self._apply(times, series, 'open-meteo', updated_at=float(saved['last_update']))
         except (OSError, ValueError, KeyError, TypeError) as e:
             log.warning('Cache inválido em %s: %s', self.cache_file, e)
             return False
@@ -82,13 +89,13 @@ class TemperatureService:
         log.info('Dados carregados do cache (%.0f min atrás).', age_min)
         return True
 
-    def _save_cache(self, temps):
+    def _save_cache(self, times, series):
         if not self.cache_file:
             return
         data = {
             'last_update': self.last_update,
-            'observed_at': self.observed_at,
-            'temps': [[la, ln, temps[(la, ln)]] for la, ln in self.grid.unique_coords],
+            'times': times,
+            'temps': [[la, ln, series[(la, ln)]] for la, ln in self.grid.unique_coords],
         }
         tmp = self.cache_file.with_suffix('.tmp')
         try:
@@ -99,7 +106,7 @@ class TemperatureService:
 
     # ─── Busca ─────────────────────────────────────────────────────────────────
     def _fetch_real_temps(self):
-        """Busca as localizações que faltam na rodada atual. Devolve (temps, observado) ou None.
+        """Busca as localizações que faltam na rodada atual. Devolve (horários, séries) ou None.
 
         Chunks já baixados ficam em `self._partial`: se a rodada falhar no meio, a próxima
         tentativa só busca o que falta, sem gastar a cota de novo.
@@ -113,12 +120,13 @@ class TemperatureService:
         try:
             for i in range(0, len(missing), config.CHUNK):
                 chunk = missing[i : i + config.CHUNK]
+                self._usage.append((time.time(), len(chunk)))
                 vals = self.fetch_chunk(chunk)
                 if len(vals) != len(chunk):
-                    vals = (list(vals) + [(None, None)] * len(chunk))[: len(chunk)]
+                    vals = (list(vals) + [{}] * len(chunk))[: len(chunk)]
                 for coord, v in zip(chunk, vals, strict=True):
                     self._partial[coord] = v
-                if self.pause:
+                if self.pause and i + config.CHUNK < len(missing):
                     time.sleep(self.pause)
         except HTTPError as e:
             if e.code == 429:
@@ -136,29 +144,55 @@ class TemperatureService:
             return None
 
         fetched, self._partial = self._partial, {}
-        temps = {}
-        observed = [t for _, t in fetched.values() if t]
+        # Lotes buscados em horas diferentes têm janelas deslocadas: fica só com os
+        # horários que todas as localizações com dados trouxeram.
+        windows = [set(v) for v in fetched.values() if v]
+        times = sorted(set.intersection(*windows)) if windows else []
+        if not times:
+            wait = self._error_backoff()
+            self._backoff_until = time.time() + wait
+            log.warning('Open-Meteo não devolveu nenhum horário em comum. Nova tentativa em %ss.', wait)
+            return None
+
+        series = {}
         for coord in self.grid.unique_coords:
-            temp = fetched[coord][0]
+            values = fetched[coord]
+            estimate = latitude_estimate(coord[0])
             # Preenche amostras faltantes (falhas raras) com uma estimativa por latitude
-            temps[coord] = temp if temp is not None else latitude_estimate(coord[0])
-        observed_at = (max(observed) + 'Z') if observed else None
-        return temps, observed_at
+            series[coord] = [values[t] if values.get(t) is not None else estimate for t in times]
+        return times, series
 
     def _error_backoff(self):
         self._failures += 1
         return min(config.ERROR_BACKOFF_MAX, config.ERROR_BACKOFF_BASE * 2 ** (self._failures - 1))
 
+    # ─── Cota ──────────────────────────────────────────────────────────────────
+    def budget_wait(self, now=None):
+        """Segundos até uma rodada completa caber no teto de 24 h (0 = já cabe).
+
+        O registro só vive em memória: reiniciar o servidor o zera (o cache em disco
+        evita que um reinício dispare uma rodada nova).
+        """
+        now = time.time() if now is None else now
+        self._usage = [(t, n) for t, n in self._usage if now - t < DAY]
+        excess = sum(n for _, n in self._usage) + len(self.grid.unique_coords) - config.DAILY_LOCATION_BUDGET
+        for t, n in self._usage:  # do mais antigo ao mais novo: espera os mais antigos vencerem
+            if excess <= 0:
+                break
+            excess -= n
+            if excess <= 0:
+                return math.ceil(t + DAY - now)
+        return 0
+
     # ─── Estado ────────────────────────────────────────────────────────────────
-    def _apply(self, temps, source, updated_at=None, observed_at=None):
-        points = self.grid.points(temps)
-        stats = self.grid.stats(temps)
+    def _apply(self, times, series, source, updated_at=None):
+        payload = self.grid.payload(times, series)
+        stats = self.grid.stats_series(times, series)
         with self._lock:
-            self._points = points
+            self._grid_payload = payload
             self._stats = stats
             self.source = source
             self.last_update = updated_at if updated_at is not None else time.time()
-            self.observed_at = observed_at
 
     def refresh_once(self):
         """Executa uma busca agora. Devolve True se aplicou dados novos."""
@@ -170,22 +204,25 @@ class TemperatureService:
             self.refreshing = False
         if result is None:
             return False
-        temps, observed_at = result
+        times, series = result
         self._failures = 0
         self._backoff_until = 0.0
-        self._apply(temps, 'open-meteo', observed_at=observed_at)
-        self._save_cache(temps)
+        self._apply(times, series, 'open-meteo')
+        self._save_cache(times, series)
+        now = current_hour_iso()
+        k = max((i for i, t in enumerate(times) if t <= now), default=0)
         log.info(
-            'Real temperatures updated — min %s  avg %s  max %s',
-            self._stats['min'],
-            self._stats['avg'],
-            self._stats['max'],
+            'Real temperatures updated (%s horários) — agora: min %s  avg %s  max %s',
+            len(times),
+            self._stats[k]['min'],
+            self._stats[k]['avg'],
+            self._stats[k]['max'],
         )
         return True
 
     def is_due(self, now=None):
         now = time.time() if now is None else now
-        if now < self._backoff_until:
+        if now < self._backoff_until or self.budget_wait(now) > 0:
             return False
         if self._force or self.source != 'open-meteo':
             return True  # forçado, ou ainda sem dado real
@@ -208,6 +245,7 @@ class TemperatureService:
         """Pede uma atualização imediata. Devolve (aceito, segundos_para_poder_de_novo)."""
         now = time.time()
         wait = max(self._last_forced + config.FORCE_COOLDOWN, self._backoff_until) - now
+        wait = max(wait, self.budget_wait(now))
         if wait > 0:
             return False, math.ceil(wait)
         self._last_forced = now
@@ -229,13 +267,12 @@ class TemperatureService:
                 next_update = now  # ainda buscando dado real; verifica de novo em breve
             next_update = max(next_update, self._backoff_until, now + config.MIN_NEXT_UPDATE)
             return {
-                'points': self._points,
+                'grid': self._grid_payload,
                 'stats': self._stats,
                 'interval': self.interval,
                 'interval_min': config.MIN_INTERVAL_MIN,
                 'interval_max': config.MAX_INTERVAL_MIN,
                 'last_update': self.last_update,
-                'observed_at': self.observed_at,
                 'next_update': next_update,
                 'refreshing': self.refreshing,
                 'retrying': now < self._backoff_until,
