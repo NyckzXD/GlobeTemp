@@ -7,6 +7,8 @@ venv/
 # Dados locais do servidor
 cache.json
 cache.tmp
+cache-usage.json
+cache-usage.tmp
 
 # Ambiente / editor
 .env

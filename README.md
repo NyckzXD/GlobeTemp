@@ -55,7 +55,7 @@ O plano gratuito do Open-Meteo é limitado por **número de localizações** (~6
 - Cada localização traz a **série horária** (`past_hours=6`, `forecast_hours=25`) numa só consulta. Como a série cobre o intervalo inteiro, o globo continua "ao vivo" entre as rodadas sem gastar cota.
 - As consultas vão em lotes de 100 localizações, uma a cada 12 s (≈ 500/min, abaixo do limite de 600/min). Uma rodada leva uns 3,5 min.
 - O intervalo mínimo é **6 h**: 1.742 × 4 atualizações/dia ≈ 7.000 localizações/dia.
-- Um **teto de 9.000 localizações em 24 h** segura atualizações forçadas e agendadas que passariam da cota. O registro fica em memória (reiniciar o servidor o zera).
+- Um **teto de 9.000 localizações em 24 h** segura atualizações forçadas e agendadas que passariam da cota. Cada lote consultado (mesmo de uma rodada que falhou) é gravado em `cache-usage.json`, ao lado do cache, então reiniciar o servidor não zera a contagem.
 - Se lotes de uma rodada chegarem em horas diferentes, só ficam os horários que todas as localizações trouxeram.
 - Se uma rodada falhar no meio, os lotes já baixados são reaproveitados na próxima tentativa (por até 30 min).
 - Erros usam **backoff exponencial** (30 s → 1 min → … → 30 min). Um `429` espera pelo menos 5 min, ou o `Retry-After` se for maior.

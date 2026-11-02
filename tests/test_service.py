@@ -89,6 +89,40 @@ def test_daily_budget_blocks_extra_rounds(make_service, monkeypatch):
     assert not svc.is_due()
 
 
+def test_daily_budget_survives_restart(make_service, monkeypatch):
+    monkeypatch.setattr(config, 'DAILY_LOCATION_BUDGET', 4000)
+    svc = make_service()
+    svc.refresh_once()
+    svc.refresh_once()
+    assert svc.budget_wait() > 0
+
+    restarted = make_service()
+    assert sum(n for _, n in restarted._usage) == 2 * 1742
+    assert restarted.budget_wait() == pytest.approx(svc.budget_wait(), abs=2)
+    assert not restarted.request_refresh()[0]
+
+
+def test_failed_round_still_counts_against_budget(make_service, fake_api):
+    fake_api.fail_on[3] = http_error(500)
+    make_service().refresh_once()
+    # os 3 lotes consultados (inclusive o que falhou) gastaram cota
+    assert sum(n for _, n in make_service()._usage) == 300
+
+
+def test_usage_record_drops_old_and_clamps_future_entries(make_service, tmp_path):
+    now = time.time()
+    record = [[now - 90000, 500], [now - 60, 100], [now + 999999, 50]]
+    (tmp_path / 'cache-usage.json').write_text(json.dumps(record))
+    svc = make_service()
+    assert [n for _, n in svc._usage] == [100, 50]
+    assert all(t <= time.time() for t, _ in svc._usage)
+
+
+def test_corrupt_usage_record_is_ignored(make_service, tmp_path):
+    (tmp_path / 'cache-usage.json').write_text('{not json')
+    assert make_service()._usage == []
+
+
 def test_error_backoff_grows_exponentially_with_ceiling(make_service):
     svc = make_service()
     waits = [svc._error_backoff() for _ in range(8)]

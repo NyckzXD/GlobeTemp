@@ -52,12 +52,17 @@ class TemperatureService:
         self._partial = {}  # localização -> {horário: temperatura}
         self._partial_started = 0.0
         self._usage = []  # (instante, localizações consultadas), só das últimas 24 h
+        self.usage_file = None
+        if self.cache_file:
+            self.usage_file = self.cache_file.with_name(self.cache_file.stem + '-usage.json')
         self.refreshing = False
 
         self._grid_payload = None
         self._stats = []
         self.source = 'synthetic'
         self.last_update = time.time()
+
+        self._load_usage()
 
         # Usa o cache em disco se houver; senão, preenchimento sintético imediato para a
         # UI já ter dados no primeiro carregamento.
@@ -104,6 +109,36 @@ class TemperatureService:
         except OSError as e:
             log.warning('Não foi possível salvar o cache: %s', e)
 
+    def _load_usage(self):
+        """Recupera o registro de cota, para um reinício não zerar o teto de 24 h."""
+        if not self.usage_file or not self.usage_file.exists():
+            return
+        try:
+            saved = json.loads(self.usage_file.read_text(encoding='utf-8'))
+            now = time.time()
+            # Um instante no futuro (relógio ajustado) conta como agora, para não travar além de 24 h
+            usage = [(min(float(t), now), int(n)) for t, n in saved]
+        except (OSError, ValueError, TypeError) as e:
+            log.warning('Registro de cota inválido em %s: %s', self.usage_file, e)
+            return
+        self._usage = sorted((t, n) for t, n in usage if now - t < DAY and n > 0)
+        if self._usage:
+            log.info('Cota recuperada: %s localizações nas últimas 24 h.', sum(n for _, n in self._usage))
+
+    def _record_usage(self, count):
+        """Registra uma consulta e grava o registro na hora (sobrevive a quedas no meio da rodada)."""
+        now = time.time()
+        self._usage = [(t, n) for t, n in self._usage if now - t < DAY]
+        self._usage.append((now, count))
+        if not self.usage_file:
+            return
+        tmp = self.usage_file.with_suffix('.tmp')
+        try:
+            tmp.write_text(json.dumps(self._usage), encoding='utf-8')
+            tmp.replace(self.usage_file)
+        except OSError as e:
+            log.warning('Não foi possível salvar o registro de cota: %s', e)
+
     # ─── Busca ─────────────────────────────────────────────────────────────────
     def _fetch_real_temps(self):
         """Busca as localizações que faltam na rodada atual. Devolve (horários, séries) ou None.
@@ -120,7 +155,7 @@ class TemperatureService:
         try:
             for i in range(0, len(missing), config.CHUNK):
                 chunk = missing[i : i + config.CHUNK]
-                self._usage.append((time.time(), len(chunk)))
+                self._record_usage(len(chunk))
                 vals = self.fetch_chunk(chunk)
                 if len(vals) != len(chunk):
                     vals = (list(vals) + [{}] * len(chunk))[: len(chunk)]
@@ -170,8 +205,7 @@ class TemperatureService:
     def budget_wait(self, now=None):
         """Segundos até uma rodada completa caber no teto de 24 h (0 = já cabe).
 
-        O registro só vive em memória: reiniciar o servidor o zera (o cache em disco
-        evita que um reinício dispare uma rodada nova).
+        O registro é gravado em disco a cada lote, então reiniciar o servidor não o zera.
         """
         now = time.time() if now is None else now
         self._usage = [(t, n) for t, n in self._usage if now - t < DAY]
