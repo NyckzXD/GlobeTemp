@@ -301,7 +301,7 @@ A grade de 12° é imposta pela cota do Open-Meteo. Alternativas:
 
 O Open-Meteo devolve `hourly` no mesmo request: dá para mostrar previsão de 24–48 h com um slider de tempo e animação, sem custo extra de cota (desde que a busca seja feita junto).
 
-### 6.3 Iluminação realista
+### 6.3 Iluminação realista ✅ _Aplicada em 2026-11-02: `static/js/sun.js` calcula o ponto subsolar pelo horário UTC da linha do tempo e o shader do mapa de calor escurece o lado noturno, com faixa de crepúsculo._
 
 Calcular a posição real do sol (declinação + hora UTC) e posicionar a `DirectionalLight` para um terminador dia/noite verdadeiro, que é o que o comentário em `app.js:34` promete.
 

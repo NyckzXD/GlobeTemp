@@ -35,9 +35,9 @@ const THERMAL = [
 ];
 
 export const PALETTES = {
-    thermal: { label: 'Thermal (diverging at 0 °C)', atmosphere: '#1a3a6b', stops: THERMAL },
+    thermal: { label: 'Térmica (divergente em 0 °C)', atmosphere: '#1a3a6b', stops: THERMAL },
     viridis: { label: 'Viridis', atmosphere: '#1f3d5c', stops: evenStops(VIRIDIS) },
-    cividis: { label: 'Cividis (color-blind safe)', atmosphere: '#1c2e4a', stops: evenStops(CIVIDIS) },
+    cividis: { label: 'Cividis (segura para daltônicos)', atmosphere: '#1c2e4a', stops: evenStops(CIVIDIS) },
     plasma:  { label: 'Plasma', atmosphere: '#2d0059', stops: evenStops(PLASMA) },
     magma:   { label: 'Magma', atmosphere: '#4a1030', stops: evenStops(MAGMA) }
 };

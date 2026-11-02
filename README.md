@@ -9,7 +9,7 @@ Globo terrestre 3D interativo com um mapa de calor da **temperatura do ar a 2 m*
 - **Globo 3D** com rotação automática (para ao arrastar), cor chapada, linhas de costa nítidas (Natural Earth 1:50m), fronteiras discretas e atmosfera colorida.
 - **Mapa de calor na GPU**: a grade (6°) vai para uma textura de floats e o shader da superfície faz interpolação **bicúbica** (Catmull-Rom) por fragmento. Fica nítido em qualquer zoom, e trocar a paleta ou o horário é instantâneo.
 - **Linha do tempo**: a série horária vai de 6 h atrás até 24 h à frente. Por padrão o globo acompanha o relógio (mistura suave entre as horas). Dá para arrastar o slider, tocar a animação ou voltar para **Now**.
-- **5 escalas de cor** com **legenda** de -40 °C a 50 °C: Thermal (divergente, centrada em 0 °C), Viridis, Cividis (segura para daltonismo), Plasma e Magma. A escolha fica salva no navegador.
+- **5 escalas de cor** com **legenda** de -40 °C a 50 °C: Térmica (divergente, centrada em 0 °C), Viridis, Cividis (segura para daltonismo), Plasma e Magma. A escolha fica salva no navegador.
 - **Tooltip** com a temperatura interpolada sob o cursor, no horário exibido (o mesmo valor que o shader pinta), e as coordenadas. No celular, toque sem arrastar.
 - **Estatísticas** do horário exibido: mínimo, máximo e média global **ponderada por área**.
 - **Indicador de estado**: `Live`, `Updating`, `Retrying`, `Stale`, `Estimated`, `Offline`.

@@ -1,97 +1,153 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>3D Earth Heatmap Globe</title>
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Globo 3D de Temperatura</title>
     <!-- Fontes do Google -->
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <link
+      href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap"
+      rel="stylesheet"
+    />
     <!-- FontAwesome (ícones) -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"
+    />
     <!-- Globe.gl (já traz o próprio Three.js) -->
-    <script src="https://unpkg.com/globe.gl@2.46.2/dist/globe.gl.min.js"
-            integrity="sha384-1uolMBZ25k3zJcNwCLEv49+L+m2dZudqAzsoSAJfQTzDCSBxJzrMuZ2dkp/5JKiT"
-            crossorigin="anonymous"></script>
+    <script
+      src="https://unpkg.com/globe.gl@2.46.2/dist/globe.gl.min.js"
+      integrity="sha384-1uolMBZ25k3zJcNwCLEv49+L+m2dZudqAzsoSAJfQTzDCSBxJzrMuZ2dkp/5JKiT"
+      crossorigin="anonymous"
+    ></script>
     <!-- CSS personalizado -->
-    <link rel="stylesheet" href="style.css">
-</head>
-<body>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
     <div id="globe-container"></div>
-    
+
     <div id="dashboard-panel">
-        <div class="header">
-            <h1><i class="fa-solid fa-earth-americas"></i> Thermal Earth</h1>
-            <div class="header-actions">
-                <span class="status-indicator" id="status-indicator" data-state="loading" role="status"><span class="dot"></span> <span id="status-label">Loading</span></span>
-                <button type="button" class="icon-btn" id="panel-toggle" aria-expanded="true" aria-controls="panel-body" aria-label="Collapse panel">
-                    <i class="fa-solid fa-chevron-up"></i>
-                </button>
-            </div>
+      <div class="header">
+        <h1><i class="fa-solid fa-earth-americas"></i> Globe Temp</h1>
+        <div class="header-actions">
+          <span
+            class="status-indicator"
+            id="status-indicator"
+            data-state="loading"
+            role="status"
+            ><span class="dot"></span>
+            <span id="status-label">Carregando</span></span
+          >
+          <button
+            type="button"
+            class="icon-btn"
+            id="panel-toggle"
+            aria-expanded="true"
+            aria-controls="panel-body"
+            aria-label="Recolher painel"
+          >
+            <i class="fa-solid fa-chevron-up"></i>
+          </button>
+        </div>
+      </div>
+
+      <div class="panel-body" id="panel-body">
+        <div class="stats-grid">
+          <div class="stat-card">
+            <div class="stat-label">Mínima</div>
+            <div class="stat-value" id="min-temp">--°C</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Média</div>
+            <div class="stat-value" id="avg-temp">--°C</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Máxima</div>
+            <div class="stat-value" id="max-temp">--°C</div>
+          </div>
         </div>
 
-        <div class="panel-body" id="panel-body">
-            <div class="stats-grid">
-                <div class="stat-card">
-                    <div class="stat-label">Min Temp</div>
-                    <div class="stat-value" id="min-temp">--°C</div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-label">Avg Temp</div>
-                    <div class="stat-value" id="avg-temp">--°C</div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-label">Max Temp</div>
-                    <div class="stat-value" id="max-temp">--°C</div>
-                </div>
-            </div>
-
-            <div class="control-section time-section">
-                <h3><label for="time-slider">Time</label></h3>
-                <div class="time-readout">
-                    <span id="time-label">--</span>
-                    <span class="time-relative" id="time-relative"></span>
-                </div>
-                <div class="time-controls">
-                    <button type="button" class="icon-btn" id="play-btn" aria-pressed="false" aria-label="Play">
-                        <i class="fa-solid fa-play"></i>
-                    </button>
-                    <input type="range" id="time-slider" min="0" max="0" step="0.01" value="0" disabled>
-                    <button type="button" class="now-btn" id="now-btn" disabled>Now</button>
-                </div>
-            </div>
-
-            <div class="control-section">
-                <h3><label for="theme-selector">Color Scale</label></h3>
-                <select id="theme-selector"><!-- opções geradas a partir de js/palettes.js --></select>
-                <div class="legend" aria-hidden="true">
-                    <div class="legend-bar" id="legend-bar"></div>
-                    <div class="legend-ticks" id="legend-ticks"></div>
-                </div>
-            </div>
-
-            <div class="control-section update-section">
-                <h3>Data Update</h3>
-                <div class="countdown-container">
-                    <div class="countdown-text">Next update in <span id="countdown-timer">--:--</span></div>
-                    <div class="progress-bar-bg">
-                        <div class="progress-bar" id="update-progress"></div>
-                    </div>
-                </div>
-                <div class="interval-control">
-                    <label for="interval-slider">Interval (min): <span id="interval-display">360</span></label>
-                    <input type="range" id="interval-slider" min="360" max="720" step="60" value="360">
-                </div>
-                <button id="force-update-btn"><i class="fa-solid fa-rotate"></i> <span class="btn-label">Force Update</span></button>
-            </div>
-
-            <div class="panel-footer">
-                <span id="observed-at">Fetched --</span>
-                <a href="https://open-meteo.com/" target="_blank" rel="noopener">Weather data by Open-Meteo.com</a>
-            </div>
+        <div class="control-section time-section">
+          <h3><label for="time-slider">Horário</label></h3>
+          <div class="time-readout">
+            <span id="time-label">--</span>
+            <span class="time-relative" id="time-relative"></span>
+          </div>
+          <div class="time-controls">
+            <button
+              type="button"
+              class="icon-btn"
+              id="play-btn"
+              aria-pressed="false"
+              aria-label="Reproduzir"
+            >
+              <i class="fa-solid fa-play"></i>
+            </button>
+            <input
+              type="range"
+              id="time-slider"
+              min="0"
+              max="0"
+              step="0.01"
+              value="0"
+              disabled
+            />
+            <button type="button" class="now-btn" id="now-btn" disabled>
+              Agora
+            </button>
+          </div>
         </div>
+
+        <div class="control-section">
+          <h3><label for="theme-selector">Escala de cores</label></h3>
+          <select id="theme-selector">
+            <!-- opções geradas a partir de js/palettes.js -->
+          </select>
+          <div class="legend" aria-hidden="true">
+            <div class="legend-bar" id="legend-bar"></div>
+            <div class="legend-ticks" id="legend-ticks"></div>
+          </div>
+        </div>
+
+        <div class="control-section update-section">
+          <h3>Atualização dos dados</h3>
+          <div class="countdown-container">
+            <div class="countdown-text">
+              Próxima atualização em <span id="countdown-timer">--:--</span>
+            </div>
+            <div class="progress-bar-bg">
+              <div class="progress-bar" id="update-progress"></div>
+            </div>
+          </div>
+          <div class="interval-control">
+            <label for="interval-slider"
+              >Intervalo (min): <span id="interval-display">360</span></label
+            >
+            <input
+              type="range"
+              id="interval-slider"
+              min="360"
+              max="720"
+              step="60"
+              value="360"
+            />
+          </div>
+          <button id="force-update-btn">
+            <i class="fa-solid fa-rotate"></i>
+            <span class="btn-label">Atualizar agora</span>
+          </button>
+        </div>
+
+        <div class="panel-footer">
+          <span id="observed-at">Baixado às --</span>
+          <a href="https://open-meteo.com/" target="_blank" rel="noopener"
+            >Dados meteorológicos: Open-Meteo.com</a
+          >
+        </div>
+      </div>
     </div>
-    
+
     <!-- JS personalizado (ES modules) -->
     <script type="module" src="js/main.js"></script>
-</body>
+  </body>
 </html>

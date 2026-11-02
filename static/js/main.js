@@ -33,8 +33,9 @@ const container = document.getElementById('globe-container');
 const world = createGlobe(container);
 const heatmap = createHeatmapLayer(world);
 loadCoastlines(world);
-const timeline = initTimeline((t) => {
+const timeline = initTimeline((t, ms) => {
     heatmap.setTime(t);
+    heatmap.setSunTime(ms);
     // Estatísticas do horário mais próximo do que está na tela
     const stats = state.stats[Math.round(t)];
     if (stats) updateStats(stats);
@@ -118,7 +119,7 @@ async function forceUpdate() {
         if (result.refresh === 'cooldown') {
             const m = Math.floor(result.retry_after / 60);
             const s = String(result.retry_after % 60).padStart(2, '0');
-            label.textContent = `Try again in ${m}:${s}`;
+            label.textContent = `Tente de novo em ${m}:${s}`;
             await sleep(3000);
             return;
         }
@@ -133,7 +134,7 @@ async function forceUpdate() {
     } catch (err) {
         console.error('Failed to force update', err);
     } finally {
-        label.textContent = 'Force Update';
+        label.textContent = 'Atualizar agora';
         icon.classList.remove('loading');
         btn.disabled = false;
     }
