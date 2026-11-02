@@ -260,6 +260,12 @@ button:active {
     transform: scale(0.98);
 }
 
+button:disabled {
+    opacity: 0.6;
+    cursor: default;
+    transform: none;
+}
+
 .fa-rotate.loading {
     animation: rotate 1s linear infinite;
 }
