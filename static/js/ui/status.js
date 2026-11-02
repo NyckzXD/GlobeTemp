@@ -31,10 +31,11 @@ export function updateObservedAt(data) {
         el.removeAttribute('title');
         return;
     }
-    const when = new Date(data.observed_at || data.last_update * 1000);
+    // Quando a série horária (modelo) foi baixada; o horário exibido fica na linha do tempo
+    const when = new Date(data.last_update * 1000);
     const time = when.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     const sameDay = when.toDateString() === new Date().toDateString();
-    el.textContent = `Observed ${sameDay ? time : `${when.toLocaleDateString()} ${time}`}`;
+    el.textContent = `Fetched ${sameDay ? time : `${when.toLocaleDateString()} ${time}`}`;
     el.title = when.toISOString();
 }
 

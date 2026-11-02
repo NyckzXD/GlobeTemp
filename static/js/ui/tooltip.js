@@ -6,8 +6,8 @@ function formatCoord(v, pos, neg) {
 }
 
 // Tooltip com a temperatura interpolada sob o cursor (ou sob o toque, no celular).
-// `getGrid` e `getPalette` são lidos a cada uso para refletir o estado atual.
-export function initTooltip(world, container, getGrid, getPalette) {
+// `getGrid`, `getTime` e `getPalette` são lidos a cada uso para refletir o estado atual.
+export function initTooltip(world, container, getGrid, getTime, getPalette) {
     const tooltip = document.createElement('div');
     tooltip.className = 'heatmap-tooltip';
     tooltip.hidden = true;
@@ -27,7 +27,7 @@ export function initTooltip(world, container, getGrid, getPalette) {
             hide();
             return;
         }
-        const temp = sampleTemp(grid, coords.lat, coords.lng);
+        const temp = sampleTemp(grid, coords.lat, coords.lng, getTime());
         value.textContent = `${temp.toFixed(1)}°C`;
         value.style.color = cssColor(temp, getPalette());
         coordsEl.textContent = `${formatCoord(coords.lat, 'N', 'S')}, ${formatCoord(coords.lng, 'E', 'W')}`;

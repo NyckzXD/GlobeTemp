@@ -1,97 +1,83 @@
-// Grade de temperatura e interpolação. Módulo puro (sem DOM): também roda nos testes do Node.
+// Grade horária de temperatura e interpolação. Módulo puro (sem DOM): também roda nos testes
+// do Node. O shader do globo (heatmap.js) faz exatamente a mesma conta na GPU; o tooltip usa
+// esta versão, então os dois mostram o mesmo valor.
 
-import { getLUT, lutIndex } from './palettes.js';
-
-// Busca binária: maior índice i com arr[i] <= v (limitado à faixa válida)
-export function bracket(arr, v) {
-    if (v <= arr[0]) return 0;
-    const last = arr.length - 1;
-    if (v >= arr[last]) return last;
-    let lo = 0, hi = last;
-    while (hi - lo > 1) {
-        const mid = (lo + hi) >> 1;
-        if (arr[mid] <= v) lo = mid; else hi = mid;
-    }
-    return lo;
+// Converte o `grid` de /api/data: eixos uniformes, um Float32Array por horário
+export function buildGrid({ lats, lngs, times, values }) {
+    if (lats.length < 2 || lngs.length < 2) throw new Error('grid needs at least 2 x 2 points');
+    return {
+        lats,
+        lngs,
+        lat0: lats[0],
+        lng0: lngs[0],
+        step: lats[1] - lats[0],
+        nLat: lats.length,
+        nLng: lngs.length,
+        // Horários UTC do Open-Meteo ("2026-11-02T17:00") em milissegundos
+        times: times.map((t) => Date.parse(`${t}Z`)),
+        frames: values.map((v) => Float32Array.from(v))
+    };
 }
 
-// Grade de temperatura derivada dos pontos (sem supor passo/deslocamento)
-export function buildGrid(points) {
-    const latSet = new Set(), lngSet = new Set();
-    for (const p of points) { latSet.add(p.lat); lngSet.add(p.lng); }
-    const lats = [...latSet].sort((a, b) => a - b); // crescente: sul -> norte
-    const lngs = [...lngSet].sort((a, b) => a - b); // crescente: oeste -> leste
-
-    const idxLat = new Map(lats.map((v, i) => [v, i]));
-    const idxLng = new Map(lngs.map((v, i) => [v, i]));
-
-    // Matriz 2D de temperatura T[índiceLat][índiceLng]
-    const T = lats.map(() => new Float32Array(lngs.length));
-    for (const p of points) {
-        T[idxLat.get(p.lat)][idxLng.get(p.lng)] = p.temp;
-    }
-    return { lats, lngs, T };
+// Posição fracionária na série (0 = primeiro horário) para um instante; satura nas pontas
+export function frameAt(grid, ms) {
+    const { times } = grid;
+    if (ms <= times[0]) return 0;
+    const last = times.length - 1;
+    if (ms >= times[last]) return last;
+    let i = 0;
+    while (times[i + 1] <= ms) i++;
+    return i + (ms - times[i]) / (times[i + 1] - times[i]);
 }
 
-// Célula do eixo que contém v: índices vizinhos e a fração entre eles
-export function axisCell(axis, v) {
-    const i0 = bracket(axis, v);
-    const i1 = Math.min(i0 + 1, axis.length - 1);
-    const lo = axis[i0], hi = axis[i1];
-    return [i0, i1, hi > lo ? Math.min(1, Math.max(0, (v - lo) / (hi - lo))) : 0];
+// Pesos de Catmull-Rom: passa pelos nós e reproduz funções lineares exatamente
+export function cubicWeights(t) {
+    const t2 = t * t, t3 = t2 * t;
+    return [
+        -0.5 * t3 + t2 - 0.5 * t,
+        1.5 * t3 - 2.5 * t2 + 1,
+        -1.5 * t3 + 2 * t2 + 0.5 * t,
+        0.5 * t3 - 0.5 * t2
+    ];
 }
 
-function bilinear(rowLo, rowHi, j0, j1, fx, fy) {
-    return rowLo[j0] * (1 - fx) * (1 - fy)
-         + rowLo[j1] * fx       * (1 - fy)
-         + rowHi[j0] * (1 - fx) * fy
-         + rowHi[j1] * fx       * fy;
-}
+// Bicúbica num horário. A longitude dá a volta (a última coluna repete a primeira, ±180°);
+// a latitude satura nos polos.
+function bicubic(grid, frame, lat, lng) {
+    const { lat0, lng0, step, nLat, nLng } = grid;
+    const period = nLng - 1;
+    const gy = Math.min(nLat - 1, Math.max(0, (lat - lat0) / step));
+    const gx = (((lng - lng0) / step) % period + period) % period;
+    const iy = Math.min(nLat - 2, Math.floor(gy)), ix = Math.floor(gx);
+    const wy = cubicWeights(gy - iy), wx = cubicWeights(gx - ix);
 
-// Temperatura interpolada num ponto qualquer: o mesmo valor que o mapa pinta ali
-export function sampleTemp(grid, lat, lng) {
-    const [i0, i1, fy] = axisCell(grid.lats, lat);
-    const [j0, j1, fx] = axisCell(grid.lngs, lng);
-    return bilinear(grid.T[i0], grid.T[i1], j0, j1, fx, fy);
-}
-
-// Campo de temperatura interpolado para uma imagem equiretangular width × height
-// (linha 0 = +90°, coluna 0 = -180°), amostrado no centro de cada pixel.
-export function interpolateField(grid, width, height) {
-    const { lats, lngs, T } = grid;
-
-    // Pré-calcula, por coluna, o intervalo de longitude + a fração
-    const colLo = new Int32Array(width);
-    const colHi = new Int32Array(width);
-    const colFrac = new Float32Array(width);
-    for (let px = 0; px < width; px++) {
-        const lng = -180 + ((px + 0.5) / width) * 360;
-        [colLo[px], colHi[px], colFrac[px]] = axisCell(lngs, lng);
-    }
-
-    const field = new Float32Array(width * height);
-    for (let py = 0; py < height; py++) {
-        const lat = 90 - ((py + 0.5) / height) * 180;
-        const [i0, i1, fy] = axisCell(lats, lat);
-        const rowLo = T[i0], rowHi = T[i1];
-        const base = py * width;
-        for (let px = 0; px < width; px++) {
-            field[base + px] = bilinear(rowLo, rowHi, colLo[px], colHi[px], colFrac[px], fy);
+    let sum = 0;
+    for (let a = 0; a < 4; a++) {
+        const row = Math.min(nLat - 1, Math.max(0, iy - 1 + a)) * nLng;
+        let rowSum = 0;
+        for (let b = 0; b < 4; b++) {
+            const col = (((ix - 1 + b) % period) + period) % period;
+            rowSum += frame[row + col] * wx[b];
         }
+        sum += rowSum * wy[a];
     }
-    return field;
+    return sum;
 }
 
-// Pinta o campo em `rgba` (Uint8ClampedArray de 4 × pixels) com a paleta escolhida.
-// Separado da interpolação: trocar de paleta só refaz este passo.
-export function colorize(field, palette, rgba) {
-    const lut = getLUT(palette);
-    for (let i = 0, o = 0; i < field.length; i++, o += 4) {
-        const k = lutIndex(field[i]) * 3;
-        rgba[o]     = lut[k];
-        rgba[o + 1] = lut[k + 1];
-        rgba[o + 2] = lut[k + 2];
-        rgba[o + 3] = 255;
-    }
-    return rgba;
+// Temperatura num ponto e num instante da série (`t` fracionário mistura dois horários)
+export function sampleTemp(grid, lat, lng, t = 0) {
+    const last = grid.frames.length - 1;
+    const tc = Math.min(last, Math.max(0, t));
+    const f0 = Math.floor(tc), f1 = Math.min(last, f0 + 1), mix = tc - f0;
+    const v0 = bicubic(grid, grid.frames[f0], lat, lng);
+    return mix > 0 ? v0 + (bicubic(grid, grid.frames[f1], lat, lng) - v0) * mix : v0;
+}
+
+// Todos os horários num só bloco (horário k ocupa as linhas k·nLat .. k·nLat + nLat - 1):
+// é a textura que o shader lê com texelFetch.
+export function packFrames(grid) {
+    const size = grid.nLat * grid.nLng;
+    const data = new Float32Array(size * grid.frames.length);
+    grid.frames.forEach((frame, k) => data.set(frame, k * size));
+    return data;
 }

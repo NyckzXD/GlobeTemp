@@ -45,6 +45,21 @@
                 </div>
             </div>
 
+            <div class="control-section time-section">
+                <h3><label for="time-slider">Time</label></h3>
+                <div class="time-readout">
+                    <span id="time-label">--</span>
+                    <span class="time-relative" id="time-relative"></span>
+                </div>
+                <div class="time-controls">
+                    <button type="button" class="icon-btn" id="play-btn" aria-pressed="false" aria-label="Play">
+                        <i class="fa-solid fa-play"></i>
+                    </button>
+                    <input type="range" id="time-slider" min="0" max="0" step="0.01" value="0" disabled>
+                    <button type="button" class="now-btn" id="now-btn" disabled>Now</button>
+                </div>
+            </div>
+
             <div class="control-section">
                 <h3><label for="theme-selector">Color Scale</label></h3>
                 <select id="theme-selector"><!-- opções geradas a partir de js/palettes.js --></select>
@@ -63,14 +78,14 @@
                     </div>
                 </div>
                 <div class="interval-control">
-                    <label for="interval-slider">Interval (min): <span id="interval-display">90</span></label>
-                    <input type="range" id="interval-slider" min="90" max="360" step="30" value="90">
+                    <label for="interval-slider">Interval (min): <span id="interval-display">360</span></label>
+                    <input type="range" id="interval-slider" min="360" max="720" step="60" value="360">
                 </div>
                 <button id="force-update-btn"><i class="fa-solid fa-rotate"></i> <span class="btn-label">Force Update</span></button>
             </div>
 
             <div class="panel-footer">
-                <span id="observed-at">Observed --</span>
+                <span id="observed-at">Fetched --</span>
                 <a href="https://open-meteo.com/" target="_blank" rel="noopener">Weather data by Open-Meteo.com</a>
             </div>
         </div>
