@@ -282,7 +282,7 @@ Calcular a posição real do sol (declinação + hora UTC) e posicionar a `Direc
 
 ## 7. Plano de execução sugerido
 
-**Fase 1 — Correções (1 dia)**
+**Fase 1 — Correções (1 dia)** ✅ *Aplicada em 2026-11-02. Escolhas feitas: intervalo de 90–360 min (passo 30), cooldown de 10 min no Force Update, bind padrão em `127.0.0.1` (`GLOBETEMP_HOST`/`GLOBETEMP_PORT` configuram).*
 1. Corrigir o loop de fetch (1.1) e o `next_update` no passado.
 2. Fazer o Force Update funcionar com cooldown (1.2).
 3. Alinhar ou remover o slider de intervalo (1.3).
