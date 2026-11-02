@@ -126,6 +126,10 @@ Resposta:
 - **globe.gl 2.46.2** / **Three.js**: renderização WebGL do globo.
 - **HTML / CSS / JavaScript** sem build.
 
+## Licença
+
+Código sob a licença [MIT](LICENSE). Os dados e recursos de terceiros abaixo seguem as licenças deles.
+
 ## Créditos
 
 - Dados meteorológicos: [Open-Meteo.com](https://open-meteo.com/), licenciados sob [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).

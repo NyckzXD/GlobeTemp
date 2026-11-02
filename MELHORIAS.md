@@ -291,7 +291,7 @@ Calcular a posição real do sol (declinação + hora UTC) e posicionar a `Direc
 6. `ThreadingHTTPServer`, bind em `127.0.0.1`, caminho absoluto do `static/`, validação do POST (2.3, 2.4).
 7. Fixar versões das CDNs (3.5).
 
-**Fase 2 — Robustez e UX (2–3 dias)** ✅ *Aplicada em 2026-11-02, exceto o `LICENSE` (a escolha da licença fica com o autor). Também entraram: `logging`, `Cache-Control` só na API, serviço criado no `main()` e `README.MD` → `README.md`.*
+**Fase 2 — Robustez e UX (2–3 dias)** ✅ *Aplicada em 2026-11-02, com `LICENSE` MIT. Também entraram: `logging`, `Cache-Control` só na API, serviço criado no `main()` e `README.MD` → `README.md`.*
 1. Cache em disco + backoff exponencial (2.1, 2.5).
 2. `sampleTemp` compartilhado e tooltip consistente (3.1).
 3. Legenda, status honesto, atribuição ao Open-Meteo, horário da observação (4.1, 4.4).
