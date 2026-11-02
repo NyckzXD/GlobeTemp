@@ -8,7 +8,7 @@ export function initPanel() {
     function setCollapsed(collapsed) {
         panel.classList.toggle('collapsed', collapsed);
         toggle.setAttribute('aria-expanded', String(!collapsed));
-        toggle.setAttribute('aria-label', collapsed ? 'Expand panel' : 'Collapse panel');
+        toggle.setAttribute('aria-label', collapsed ? 'Expandir painel' : 'Recolher painel');
     }
 
     let saved = null;

@@ -1,11 +1,13 @@
+import { LOCALE } from '../config.js';
+
 // Estado → texto do indicador; a cor vem do CSS via data-state
 const STATUS_LABELS = {
-    loading: 'Loading',
-    live: 'Live',
-    stale: 'Stale',
-    updating: 'Updating',
-    retrying: 'Retrying',
-    estimated: 'Estimated',
+    loading: 'Carregando',
+    live: 'Ao vivo',
+    stale: 'Desatualizado',
+    updating: 'Atualizando',
+    retrying: 'Tentando de novo',
+    estimated: 'Estimado',
     offline: 'Offline'
 };
 
@@ -27,15 +29,15 @@ export function statusFor(data, now = Date.now()) {
 export function updateObservedAt(data) {
     const el = document.getElementById('observed-at');
     if (data.source !== 'open-meteo') {
-        el.textContent = 'Latitude estimate — waiting for live data';
+        el.textContent = 'Estimativa por latitude — aguardando dados reais';
         el.removeAttribute('title');
         return;
     }
     // Quando a série horária (modelo) foi baixada; o horário exibido fica na linha do tempo
     const when = new Date(data.last_update * 1000);
-    const time = when.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const time = when.toLocaleTimeString(LOCALE, { hour: '2-digit', minute: '2-digit' });
     const sameDay = when.toDateString() === new Date().toDateString();
-    el.textContent = `Fetched ${sameDay ? time : `${when.toLocaleDateString()} ${time}`}`;
+    el.textContent = sameDay ? `Baixado às ${time}` : `Baixado em ${when.toLocaleDateString(LOCALE)} às ${time}`;
     el.title = when.toISOString();
 }
 

@@ -1,3 +1,6 @@
+// Idioma da interface (datas e horas)
+export const LOCALE = 'pt-BR';
+
 // Recursos externos com versão fixa (ver index.html para o globe.gl)
 // Natural Earth 1:50m em TopoJSON: linhas de costa e fronteiras
 export const COASTLINES_URL = 'https://cdn.jsdelivr.net/npm/world-atlas@2.0.2/countries-50m.json';

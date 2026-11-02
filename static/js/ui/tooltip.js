@@ -11,7 +11,7 @@ export function initTooltip(world, container, getGrid, getTime, getPalette) {
     const tooltip = document.createElement('div');
     tooltip.className = 'heatmap-tooltip';
     tooltip.hidden = true;
-    const title = Object.assign(document.createElement('div'), { className: 'tooltip-title', textContent: 'Temperature' });
+    const title = Object.assign(document.createElement('div'), { className: 'tooltip-title', textContent: 'Temperatura' });
     const value = Object.assign(document.createElement('div'), { className: 'tooltip-value' });
     const coordsEl = Object.assign(document.createElement('div'), { className: 'tooltip-coords' });
     tooltip.append(title, value, coordsEl);
@@ -30,7 +30,7 @@ export function initTooltip(world, container, getGrid, getTime, getPalette) {
         const temp = sampleTemp(grid, coords.lat, coords.lng, getTime());
         value.textContent = `${temp.toFixed(1)}°C`;
         value.style.color = cssColor(temp, getPalette());
-        coordsEl.textContent = `${formatCoord(coords.lat, 'N', 'S')}, ${formatCoord(coords.lng, 'E', 'W')}`;
+        coordsEl.textContent = `${formatCoord(coords.lat, 'N', 'S')}, ${formatCoord(coords.lng, 'L', 'O')}`;
         tooltip.hidden = false;
 
         // Mantém o tooltip dentro da tela

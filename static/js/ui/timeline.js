@@ -1,12 +1,12 @@
-import { FOLLOW_NOW_MS, PLAY_HOURS_PER_SECOND } from '../config.js';
+import { FOLLOW_NOW_MS, LOCALE, PLAY_HOURS_PER_SECOND } from '../config.js';
 import { frameAt } from '../grid.js';
 
 const HOUR = 3600 * 1000;
 
-// Função pura (testada no Node): distância em horas até agora, como "Now", "+3 h" ou "−2 h"
+// Função pura (testada no Node): distância em horas até agora, como "Agora", "+3 h" ou "−2 h"
 export function relativeLabel(ms, now = Date.now()) {
     const hours = Math.round((ms - now) / HOUR);
-    if (hours === 0) return 'Now';
+    if (hours === 0) return 'Agora';
     return hours > 0 ? `+${hours} h` : `−${-hours} h`;
 }
 
@@ -35,7 +35,7 @@ export function initTimeline(onChange) {
         if (!grid) return;
         const ms = timeAt(grid, t);
         const when = new Date(ms);
-        label.textContent = when.toLocaleString([], {
+        label.textContent = when.toLocaleString(LOCALE, {
             weekday: 'short', hour: '2-digit', minute: '2-digit'
         });
         label.title = when.toISOString();
@@ -54,7 +54,7 @@ export function initTimeline(onChange) {
     function setPlaying(value) {
         playing = value && grid && grid.times.length > 1;
         playBtn.setAttribute('aria-pressed', String(playing));
-        playBtn.setAttribute('aria-label', playing ? 'Pause' : 'Play');
+        playBtn.setAttribute('aria-label', playing ? 'Pausar' : 'Reproduzir');
         playBtn.querySelector('i').className = `fa-solid ${playing ? 'fa-pause' : 'fa-play'}`;
         if (playing) {
             follow = false;

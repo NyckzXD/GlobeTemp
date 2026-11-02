@@ -6,8 +6,8 @@ import { relativeLabel } from '../../static/js/ui/timeline.js';
 const now = Date.UTC(2026, 10, 2, 12, 10);
 const HOUR = 3600 * 1000;
 
-test('horário dentro da mesma hora: Now', () => {
-    assert.equal(relativeLabel(now - 10 * 60 * 1000, now), 'Now');
+test('horário dentro da mesma hora: Agora', () => {
+    assert.equal(relativeLabel(now - 10 * 60 * 1000, now), 'Agora');
 });
 
 test('previsão e passado em horas', () => {
