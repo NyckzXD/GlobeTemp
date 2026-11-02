@@ -7,6 +7,7 @@
     --accent-blue: #58a6ff;
     --accent-green: #3fb950;
     --accent-red: #f85149;
+    --accent-amber: #d29922;
 }
 
 * {
@@ -21,6 +22,7 @@ body {
     color: var(--text-main);
     overflow: hidden;
     height: 100vh;
+    height: 100dvh;
     width: 100vw;
 }
 
@@ -49,6 +51,31 @@ body {
     display: flex;
     flex-direction: column;
     gap: 24px;
+    max-height: calc(100dvh - 40px);
+    overflow-y: auto;
+}
+
+.panel-body {
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+}
+
+#dashboard-panel.collapsed {
+    gap: 0;
+}
+
+#dashboard-panel.collapsed .panel-body {
+    display: none;
+}
+
+#dashboard-panel.collapsed .header {
+    border-bottom: none;
+    padding-bottom: 0;
+}
+
+#dashboard-panel.collapsed #panel-toggle i {
+    transform: rotate(180deg);
 }
 
 .header {
@@ -71,35 +98,52 @@ body {
     color: var(--accent-blue);
 }
 
+.header-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+/* A cor do indicador segue o estado dos dados (data-state, definido no app.js) */
 .status-indicator {
+    --status-color: var(--text-muted);
     font-size: 0.85rem;
     font-weight: 600;
-    color: var(--accent-green);
+    color: var(--status-color);
     display: flex;
     align-items: center;
     gap: 6px;
-    background: rgba(63, 185, 80, 0.1);
+    background: color-mix(in srgb, var(--status-color) 10%, transparent);
     padding: 4px 10px;
     border-radius: 20px;
-    border: 1px solid rgba(63, 185, 80, 0.2);
+    border: 1px solid color-mix(in srgb, var(--status-color) 25%, transparent);
+    white-space: nowrap;
 }
+
+.status-indicator[data-state="live"]      { --status-color: var(--accent-green); }
+.status-indicator[data-state="updating"]  { --status-color: var(--accent-blue); }
+.status-indicator[data-state="stale"],
+.status-indicator[data-state="retrying"],
+.status-indicator[data-state="estimated"] { --status-color: var(--accent-amber); }
+.status-indicator[data-state="offline"]   { --status-color: var(--accent-red); }
 
 .dot {
     width: 8px;
     height: 8px;
-    background-color: var(--accent-green);
+    background-color: currentColor;
     border-radius: 50%;
     display: inline-block;
 }
 
-.pulse {
+.status-indicator[data-state="live"] .dot,
+.status-indicator[data-state="updating"] .dot {
     animation: pulsing 1.5s infinite;
 }
 
 @keyframes pulsing {
-    0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(63, 185, 80, 0.7); }
-    70% { transform: scale(1); box-shadow: 0 0 0 6px rgba(63, 185, 80, 0); }
-    100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(63, 185, 80, 0); }
+    0% { transform: scale(0.95); box-shadow: 0 0 0 0 color-mix(in srgb, currentColor 70%, transparent); }
+    70% { transform: scale(1); box-shadow: 0 0 0 6px transparent; }
+    100% { transform: scale(0.95); box-shadow: 0 0 0 0 transparent; }
 }
 
 .stats-grid {
@@ -114,12 +158,6 @@ body {
     border-radius: 12px;
     padding: 12px;
     text-align: center;
-    transition: transform 0.2s, background 0.2s;
-}
-
-.stat-card:hover {
-    transform: translateY(-2px);
-    background: rgba(255, 255, 255, 0.06);
 }
 
 .stat-label {
@@ -275,26 +313,129 @@ button:disabled {
 }
 
 /* Estilos do tooltip */
-.scene-tooltip {
-    background: rgba(13, 17, 23, 0.85) !important;
-    backdrop-filter: blur(8px) !important;
-    -webkit-backdrop-filter: blur(8px) !important;
-    border: 1px solid rgba(255, 255, 255, 0.1) !important;
-    border-radius: 8px !important;
-    padding: 12px !important;
-    color: var(--text-main) !important;
-    font-family: 'Outfit', sans-serif !important;
-    box-shadow: 0 4px 20px rgba(0,0,0,0.4) !important;
+.heatmap-tooltip {
+    position: fixed;
+    z-index: 999;
+    background: rgba(13, 17, 23, 0.88);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 10px;
+    padding: 10px 14px;
+    color: var(--text-main);
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
     pointer-events: none;
 }
 
-.tooltip-title {
-    font-size: 0.8rem;
-    color: var(--text-muted);
-    margin-bottom: 4px;
-    text-transform: uppercase;
+.heatmap-tooltip[hidden] {
+    display: none;
 }
+
+.tooltip-title,
+.tooltip-coords {
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    letter-spacing: 0.5px;
+}
+
+.tooltip-title {
+    text-transform: uppercase;
+    margin-bottom: 4px;
+}
+
 .tooltip-value {
-    font-size: 1.2rem;
+    font-size: 1.3rem;
     font-weight: 700;
+}
+
+.tooltip-coords {
+    margin-top: 4px;
+}
+
+/* Botão de ícone (recolher painel) — sobrescreve o estilo largo dos botões */
+.icon-btn {
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    flex-shrink: 0;
+    border-radius: 50%;
+    font-size: 0.85rem;
+}
+
+.icon-btn i {
+    transition: transform 0.2s;
+}
+
+/* Legenda de cores */
+.legend {
+    margin-top: 14px;
+}
+
+.legend-bar {
+    height: 10px;
+    border-radius: 5px;
+    border: 1px solid var(--panel-border);
+}
+
+.legend-ticks {
+    position: relative;
+    height: 16px;
+    margin-top: 4px;
+    font-size: 0.72rem;
+    color: var(--text-muted);
+}
+
+.legend-ticks span {
+    position: absolute;
+    transform: translateX(-50%);
+}
+
+.legend-ticks span:first-child {
+    transform: none;
+}
+
+/* Rodapé: horário da observação + atribuição exigida pela licença do Open-Meteo */
+.panel-footer {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    gap: 4px 12px;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    border-top: 1px solid var(--panel-border);
+    padding-top: 12px;
+}
+
+.panel-footer a {
+    color: var(--text-muted);
+}
+
+.panel-footer a:hover {
+    color: var(--text-main);
+}
+
+/* Celular: o painel vira uma folha na parte de baixo da tela */
+@media (max-width: 640px) {
+    #dashboard-panel {
+        top: auto;
+        right: 12px;
+        bottom: 12px;
+        left: 12px;
+        width: auto;
+        max-height: 60dvh;
+        padding: 16px;
+        gap: 16px;
+    }
+
+    .panel-body {
+        gap: 16px;
+    }
+
+    .header {
+        padding-bottom: 12px;
+    }
+
+    .header h1 {
+        font-size: 1.1rem;
+    }
 }

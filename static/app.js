@@ -1,5 +1,6 @@
 // Dados e estado
 let earthData = [];
+let grid = null;             // grade de temperatura usada pelo mapa e pelo tooltip
 let simInterval = 90;
 let currentTheme = 'thermal';
 let lastUpdate = 0;
@@ -189,8 +190,8 @@ function bracket(arr, v) {
     return lo;
 }
 
-function renderHeatmapCanvas(points, palette, withEarth) {
-    // Deriva os eixos reais da grade direto dos dados (sem supor passo/deslocamento)
+// Grade de temperatura derivada dos pontos (sem supor passo/deslocamento)
+function buildGrid(points) {
     const latSet = new Set(), lngSet = new Set();
     for (const p of points) { latSet.add(p.lat); lngSet.add(p.lng); }
     const lats = [...latSet].sort((a, b) => a - b); // crescente: sul -> norte
@@ -204,17 +205,41 @@ function renderHeatmapCanvas(points, palette, withEarth) {
     for (const p of points) {
         T[idxLat.get(p.lat)][idxLng.get(p.lng)] = p.temp;
     }
+    return { lats, lngs, T };
+}
+
+// Célula do eixo que contém v: índices vizinhos e a fração entre eles
+function axisCell(axis, v) {
+    const i0 = bracket(axis, v);
+    const i1 = Math.min(i0 + 1, axis.length - 1);
+    const lo = axis[i0], hi = axis[i1];
+    return [i0, i1, hi > lo ? Math.min(1, Math.max(0, (v - lo) / (hi - lo))) : 0];
+}
+
+function bilinear(rowLo, rowHi, j0, j1, fx, fy) {
+    return rowLo[j0] * (1 - fx) * (1 - fy)
+         + rowLo[j1] * fx       * (1 - fy)
+         + rowHi[j0] * (1 - fx) * fy
+         + rowHi[j1] * fx       * fy;
+}
+
+// Temperatura interpolada num ponto qualquer: o mesmo valor que o mapa pinta ali
+function sampleTemp(grid, lat, lng) {
+    const [i0, i1, fy] = axisCell(grid.lats, lat);
+    const [j0, j1, fx] = axisCell(grid.lngs, lng);
+    return bilinear(grid.T[i0], grid.T[i1], j0, j1, fx, fy);
+}
+
+function renderHeatmapCanvas(grid, palette, withEarth) {
+    const { lats, lngs, T } = grid;
 
     // Pré-calcula, por coluna, o intervalo de longitude + a fração
     const colLo = new Int32Array(CANVAS_W);
+    const colHi = new Int32Array(CANVAS_W);
     const colFrac = new Float32Array(CANVAS_W);
     for (let px = 0; px < CANVAS_W; px++) {
         const lng = -180 + ((px + 0.5) / CANVAS_W) * 360;
-        const j = bracket(lngs, lng);
-        colLo[px] = j;
-        const lo = lngs[j];
-        const hi = lngs[Math.min(j + 1, lngs.length - 1)];
-        colFrac[px] = hi > lo ? (lng - lo) / (hi - lo) : 0;
+        [colLo[px], colHi[px], colFrac[px]] = axisCell(lngs, lng);
     }
 
     const lut = getLUT(palette);
@@ -224,28 +249,12 @@ function renderHeatmapCanvas(points, palette, withEarth) {
     for (let py = 0; py < CANVAS_H; py++) {
         // O topo da textura é +90 (norte), a base é -90
         const lat = 90 - ((py + 0.5) / CANVAS_H) * 180;
-        const i0 = bracket(lats, lat);
-        const i1 = Math.min(i0 + 1, lats.length - 1);
-        const latLo = lats[i0];
-        const latHi = lats[i1];
-        const fy = latHi > latLo ? (lat - latLo) / (latHi - latLo) : 0;
+        const [i0, i1, fy] = axisCell(lats, lat);
         const rowLo = T[i0];
         const rowHi = T[i1];
 
         for (let px = 0; px < CANVAS_W; px++) {
-            const j0 = colLo[px];
-            const j1 = Math.min(j0 + 1, lngs.length - 1);
-            const fx = colFrac[px];
-
-            const tLL = rowLo[j0];
-            const tLH = rowLo[j1];
-            const tHL = rowHi[j0];
-            const tHH = rowHi[j1];
-
-            const temp = tLL * (1 - fx) * (1 - fy)
-                       + tLH * fx       * (1 - fy)
-                       + tHL * (1 - fx) * fy
-                       + tHH * fx       * fy;
+            const temp = bilinear(rowLo, rowHi, colLo[px], colHi[px], colFrac[px], fy);
 
             let k = ((temp - LUT_MIN) / (LUT_MAX - LUT_MIN)) * (LUT_SIZE - 1);
             k = k < 0 ? 0 : (k > LUT_SIZE - 1 ? LUT_SIZE - 1 : k) | 0;
@@ -276,13 +285,14 @@ function renderHeatmapCanvas(points, palette, withEarth) {
 
 function applyHeatmap(points, palette) {
     if (!points || !points.length) return;
-    renderHeatmapCanvas(points, palette, true);
+    grid = buildGrid(points);
+    renderHeatmapCanvas(grid, palette, true);
     try {
         world.globeImageUrl(offscreenCanvas.toDataURL('image/jpeg', 0.92));
     } catch (e) {
         // Se a imagem cross-origin da Terra contaminou o canvas, tenta de novo sem ela
         earthImgLoaded = false;
-        renderHeatmapCanvas(points, palette, false);
+        renderHeatmapCanvas(grid, palette, false);
         try {
             world.globeImageUrl(offscreenCanvas.toDataURL('image/jpeg', 0.92));
         } catch (e2) {
@@ -293,64 +303,113 @@ function applyHeatmap(points, palette) {
 
 // ─── Tooltip (ao passar o mouse) ──────────────────────────────────────────────
 const tooltip = document.createElement('div');
-tooltip.id = 'heatmap-tooltip';
-tooltip.style.cssText = `
-    position: fixed;
-    display: none;
-    background: rgba(13,17,23,0.88);
-    backdrop-filter: blur(8px);
-    border: 1px solid rgba(255,255,255,0.12);
-    border-radius: 10px;
-    padding: 10px 14px;
-    color: #e6edf3;
-    font-family: 'Outfit', sans-serif;
-    font-size: 0.85rem;
-    pointer-events: none;
-    z-index: 999;
-    box-shadow: 0 4px 20px rgba(0,0,0,0.5);
-`;
+tooltip.className = 'heatmap-tooltip';
+tooltip.hidden = true;
+const tooltipTitle = Object.assign(document.createElement('div'), { className: 'tooltip-title', textContent: 'Temperature' });
+const tooltipValue = Object.assign(document.createElement('div'), { className: 'tooltip-value' });
+const tooltipCoords = Object.assign(document.createElement('div'), { className: 'tooltip-coords' });
+tooltip.append(tooltipTitle, tooltipValue, tooltipCoords);
 document.body.appendChild(tooltip);
+
+function formatCoord(v, pos, neg) {
+    return `${Math.abs(v).toFixed(1)}°${v >= 0 ? pos : neg}`;
+}
+
+function hideTooltip() { tooltip.hidden = true; }
 
 function showTooltipAt(clientX, clientY) {
     // Converte o pixel da tela sob o cursor em coordenadas do globo
     const coords = world.toGlobeCoords(clientX, clientY);
-    if (!coords || !earthData.length) {
-        tooltip.style.display = 'none';
+    if (!coords || !grid) {
+        hideTooltip();
         return;
     }
-    let best = null, bestDist = Infinity;
-    for (const p of earthData) {
-        const d = Math.abs(p.lat - coords.lat) + Math.abs(p.lng - coords.lng);
-        if (d < bestDist) { bestDist = d; best = p; }
-    }
-    if (best) {
-        const color = tempToHex(best.temp);
-        tooltip.innerHTML = `
-            <div style="font-size:0.72rem;color:#7d8590;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">Temperature</div>
-            <div style="font-size:1.3rem;font-weight:700;color:${color}">${best.temp.toFixed(1)}°C</div>
-            <div style="font-size:0.72rem;color:#7d8590;margin-top:4px">${coords.lat.toFixed(1)}°, ${coords.lng.toFixed(1)}°</div>
-        `;
-        tooltip.style.display = 'block';
-        tooltip.style.left = (clientX + 16) + 'px';
-        tooltip.style.top  = (clientY - 10) + 'px';
-    } else {
-        tooltip.style.display = 'none';
-    }
+    const temp = sampleTemp(grid, coords.lat, coords.lng);
+    tooltipValue.textContent = `${temp.toFixed(1)}°C`;
+    tooltipValue.style.color = tempToHex(temp);
+    tooltipCoords.textContent = `${formatCoord(coords.lat, 'N', 'S')}, ${formatCoord(coords.lng, 'E', 'W')}`;
+    tooltip.hidden = false;
+
+    // Mantém o tooltip dentro da tela
+    const { width, height } = tooltip.getBoundingClientRect();
+    const left = clientX + 16 + width > window.innerWidth ? clientX - 16 - width : clientX + 16;
+    const top = Math.min(Math.max(8, clientY - 10), window.innerHeight - height - 8);
+    tooltip.style.left = `${left}px`;
+    tooltip.style.top = `${top}px`;
 }
 
-document.getElementById('globe-container').addEventListener('mousemove', (e) => {
-    showTooltipAt(e.clientX, e.clientY);
+const globeContainer = document.getElementById('globe-container');
+
+// Mouse: acompanha o cursor, no máximo uma vez por quadro
+let pendingPointer = null;
+globeContainer.addEventListener('pointermove', (e) => {
+    if (e.pointerType !== 'mouse') return;
+    if (!pendingPointer) {
+        requestAnimationFrame(() => {
+            showTooltipAt(pendingPointer.x, pendingPointer.y);
+            pendingPointer = null;
+        });
+    }
+    pendingPointer = { x: e.clientX, y: e.clientY };
+});
+globeContainer.addEventListener('pointerleave', (e) => {
+    if (e.pointerType === 'mouse') hideTooltip();
 });
 
-document.getElementById('globe-container').addEventListener('mouseleave', () => {
-    tooltip.style.display = 'none';
+// Toque: um toque sem arrastar fixa o tooltip naquele ponto
+let touchStart = null;
+let touchHideTimer = null;
+globeContainer.addEventListener('pointerdown', (e) => {
+    if (e.pointerType !== 'mouse') touchStart = { x: e.clientX, y: e.clientY };
+});
+globeContainer.addEventListener('pointerup', (e) => {
+    if (e.pointerType === 'mouse' || !touchStart) return;
+    const moved = Math.hypot(e.clientX - touchStart.x, e.clientY - touchStart.y);
+    touchStart = null;
+    if (moved > 8) { hideTooltip(); return; }
+    showTooltipAt(e.clientX, e.clientY);
+    clearTimeout(touchHideTimer);
+    touchHideTimer = setTimeout(hideTooltip, 4000);
 });
 
 // ─── Busca e atualização ──────────────────────────────────────────────────────
 
-function setStatus(text) {
-    const statusLabel = document.getElementById('status-label');
-    if (statusLabel) statusLabel.textContent = text;
+// Estado → texto do indicador; a cor vem do CSS via data-state
+const STATUS_LABELS = {
+    loading: 'Loading',
+    live: 'Live',
+    stale: 'Stale',
+    updating: 'Updating',
+    retrying: 'Retrying',
+    estimated: 'Estimated',
+    offline: 'Offline'
+};
+
+function setStatus(state) {
+    document.getElementById('status-indicator').dataset.state = state;
+    document.getElementById('status-label').textContent = STATUS_LABELS[state];
+}
+
+function statusFor(data) {
+    if (data.refreshing) return 'updating';
+    if (data.source !== 'open-meteo') return 'estimated';
+    if (data.retrying) return 'retrying';
+    // Dado real, mas bem mais velho que o intervalo (ex.: cache antigo, API fora do ar)
+    const ageMs = Date.now() - data.last_update * 1000;
+    return ageMs > data.interval * 60 * 1000 * 1.5 ? 'stale' : 'live';
+}
+
+function updateObservedAt(data) {
+    const el = document.getElementById('observed-at');
+    if (data.source !== 'open-meteo') {
+        el.textContent = 'Latitude estimate — waiting for live data';
+        return;
+    }
+    const when = new Date(data.observed_at || data.last_update * 1000);
+    const time = when.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const sameDay = when.toDateString() === new Date().toDateString();
+    el.textContent = `Observed ${sameDay ? time : `${when.toLocaleDateString()} ${time}`}`;
+    el.title = when.toISOString();
 }
 
 async function fetchData() {
@@ -361,7 +420,7 @@ async function fetchData() {
         data = await response.json();
     } catch (err) {
         console.error('Failed to fetch data', err);
-        setStatus('Offline');
+        setStatus('offline');
         nextUpdate = Date.now() + RETRY_ON_ERROR_MS;
         startCountdown();
         return null;
@@ -378,7 +437,8 @@ async function fetchData() {
         renderedUpdate = data.last_update;
     }
 
-    setStatus(data.refreshing ? 'Updating' : (data.source === 'open-meteo') ? 'Live' : 'Sim');
+    setStatus(statusFor(data));
+    updateObservedAt(data);
 
     document.getElementById('min-temp').textContent = `${data.stats.min}°C`;
     document.getElementById('avg-temp').textContent = `${data.stats.avg}°C`;
@@ -424,7 +484,7 @@ async function forceUpdate() {
         }
         const before = lastUpdate;
         const deadline = Date.now() + FORCE_POLL_TIMEOUT_MS;
-        setStatus('Updating');
+        setStatus('updating');
         while (Date.now() < deadline) {
             await sleep(FORCE_POLL_MS);
             const data = await fetchData();
@@ -463,6 +523,52 @@ function startCountdown() {
     countdownIntervalId = setInterval(tick, 1000);
 }
 
+// ─── Legenda e painel ─────────────────────────────────────────────────────────
+
+const LEGEND_MIN = -40;
+const LEGEND_MAX = 50;
+const LEGEND_TICKS = [-40, -20, 0, 20, 40];
+
+function renderLegend(palette) {
+    const stops = [];
+    for (let t = LEGEND_MIN; t <= LEGEND_MAX; t += 5) {
+        const [r, g, b] = interpolateColor(t, palette);
+        stops.push(`rgb(${r},${g},${b}) ${((t - LEGEND_MIN) / (LEGEND_MAX - LEGEND_MIN)) * 100}%`);
+    }
+    document.getElementById('legend-bar').style.background = `linear-gradient(90deg, ${stops.join(', ')})`;
+
+    const ticks = document.getElementById('legend-ticks');
+    ticks.replaceChildren(...LEGEND_TICKS.map((t) => {
+        const span = document.createElement('span');
+        span.textContent = `${t}°`;
+        span.style.left = `${((t - LEGEND_MIN) / (LEGEND_MAX - LEGEND_MIN)) * 100}%`;
+        return span;
+    }));
+}
+
+// Painel recolhível; começa recolhido em telas estreitas e lembra a escolha
+const PANEL_KEY = 'globetemp.panelCollapsed';
+const panel = document.getElementById('dashboard-panel');
+const panelToggle = document.getElementById('panel-toggle');
+
+function setPanelCollapsed(collapsed) {
+    panel.classList.toggle('collapsed', collapsed);
+    panelToggle.setAttribute('aria-expanded', String(!collapsed));
+    panelToggle.setAttribute('aria-label', collapsed ? 'Expand panel' : 'Collapse panel');
+}
+
+let savedCollapsed = null;
+try { savedCollapsed = localStorage.getItem(PANEL_KEY); } catch (e) { /* storage bloqueado */ }
+setPanelCollapsed(savedCollapsed !== null
+    ? savedCollapsed === 'true'
+    : window.matchMedia('(max-width: 640px)').matches);
+
+panelToggle.addEventListener('click', () => {
+    const collapsed = !panel.classList.contains('collapsed');
+    setPanelCollapsed(collapsed);
+    try { localStorage.setItem(PANEL_KEY, String(collapsed)); } catch (e) { /* storage bloqueado */ }
+});
+
 // ─── Ouvintes de eventos ──────────────────────────────────────────────────────
 
 document.getElementById('theme-selector').addEventListener('change', (e) => {
@@ -474,6 +580,7 @@ document.getElementById('theme-selector').addEventListener('change', (e) => {
         glacier: '#003366'
     };
     world.atmosphereColor(atmoColors[currentTheme]);
+    renderLegend(currentTheme);
     if (earthData.length) applyHeatmap(earthData, currentTheme);
 });
 
@@ -496,4 +603,5 @@ window.addEventListener('resize', () => {
 });
 
 // ─── Início ───────────────────────────────────────────────────────────────────
+renderLegend(currentTheme);
 fetchData();

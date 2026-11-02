@@ -1,5 +1,6 @@
 import http.server
 import json
+import logging
 import math
 import os
 import threading
@@ -12,7 +13,10 @@ from urllib.error import HTTPError
 
 HOST = os.environ.get('GLOBETEMP_HOST', '127.0.0.1')   # use 0.0.0.0 para expor na rede
 PORT = int(os.environ.get('GLOBETEMP_PORT', '5005'))
-STATIC_DIR = Path(__file__).resolve().parent / 'static'
+BASE_DIR = Path(__file__).resolve().parent
+STATIC_DIR = BASE_DIR / 'static'
+# Último resultado real salvo em disco: reiniciar o servidor não gasta cota de novo
+CACHE_FILE = Path(os.environ.get('GLOBETEMP_CACHE', BASE_DIR / 'cache.json'))
 
 # ─── Configuração ──────────────────────────────────────────────────────────────
 # O plano gratuito do Open-Meteo limita por NÚMERO DE LOCALIZAÇÕES (~600/min, ~10k/dia),
@@ -25,10 +29,15 @@ MIN_INTERVAL_MIN = 90
 MAX_INTERVAL_MIN = 360
 DEFAULT_INTERVAL_MIN = 90
 FORCE_COOLDOWN = 600          # segundos mínimos entre atualizações forçadas
-RATE_LIMIT_BACKOFF = 300      # segundos de espera após um 429
+RATE_LIMIT_BACKOFF = 300      # espera mínima após um 429 (ou o Retry-After, se maior)
+ERROR_BACKOFF_BASE = 30       # outras falhas: 30 s, 1 min, 2 min, ... até o teto
+ERROR_BACKOFF_MAX = 1800
+PARTIAL_MAX_AGE = 1800        # chunks já baixados valem para completar a rodada por 30 min
 MIN_NEXT_UPDATE = 15          # nunca anunciar ao cliente uma próxima atualização no passado
 MAX_POST_BYTES = 1024
 OPEN_METEO_URL = 'https://api.open-meteo.com/v1/forecast'
+
+log = logging.getLogger('globetemp')
 
 
 def latitude_estimate(lat):
@@ -46,32 +55,82 @@ def canonical(lat, lng):
     return (lat, lng)
 
 
+def retry_after_seconds(err):
+    """Lê o header Retry-After (em segundos) de um HTTPError, se houver."""
+    try:
+        return int(err.headers.get('Retry-After', ''))
+    except (TypeError, ValueError, AttributeError):
+        return 0
+
+
 class ThermalSimulation:
-    def __init__(self):
+    def __init__(self, cache_file=CACHE_FILE, start=True):
         self.interval = DEFAULT_INTERVAL_MIN
         self.lats = list(range(-90, 91, GRID_STEP))
         self.lngs = list(range(-180, 181, GRID_STEP))
         self.coords = [(la, ln) for la in self.lats for ln in self.lngs]
         # Só estas são consultadas; o resto da grade é cópia (evita gastar cota à toa)
         self.unique_coords = sorted({canonical(la, ln) for la, ln in self.coords})
+        self.cache_file = Path(cache_file) if cache_file else None
 
         self._lock = threading.Lock()
         self._refresh_now = threading.Event()
         self._backoff_until = 0.0
+        self._failures = 0
         self._force = False
         self._last_forced = 0.0
+        self._partial = {}            # localização -> (temp, horário observado)
+        self._partial_started = 0.0
         self.refreshing = False
 
         self._points = []
         self._stats = {'min': 0, 'max': 0, 'avg': 0}
         self.source = 'synthetic'
         self.last_update = time.time()
+        self.observed_at = None
 
-        # Preenchimento sintético imediato para a UI já ter dados no primeiro carregamento
-        self._apply(self._synthetic_temps(), 'synthetic')
+        # Usa o cache em disco se houver; senão, preenchimento sintético imediato para a
+        # UI já ter dados no primeiro carregamento.
+        if not self._load_cache():
+            self._apply(self._synthetic_temps(), 'synthetic')
 
         # Os dados reais são buscados em segundo plano para o servidor subir na hora.
-        threading.Thread(target=self._refresh_loop, daemon=True).start()
+        if start:
+            threading.Thread(target=self._refresh_loop, daemon=True).start()
+
+    # ─── Cache em disco ────────────────────────────────────────────────────────
+    def _load_cache(self):
+        if not self.cache_file or not self.cache_file.exists():
+            return False
+        try:
+            saved = json.loads(self.cache_file.read_text(encoding='utf-8'))
+            temps = {(la, ln): t for la, ln, t in saved['temps']}
+            if set(temps) != set(self.unique_coords):
+                log.info("Cache ignorado: a grade mudou desde que foi salvo.")
+                return False
+            self._apply(temps, 'open-meteo', updated_at=float(saved['last_update']),
+                        observed_at=saved.get('observed_at'))
+        except (OSError, ValueError, KeyError, TypeError) as e:
+            log.warning("Cache inválido em %s: %s", self.cache_file, e)
+            return False
+        age_min = (time.time() - self.last_update) / 60
+        log.info("Dados carregados do cache (%.0f min atrás).", age_min)
+        return True
+
+    def _save_cache(self, temps):
+        if not self.cache_file:
+            return
+        data = {
+            'last_update': self.last_update,
+            'observed_at': self.observed_at,
+            'temps': [[la, ln, temps[(la, ln)]] for la, ln in self.unique_coords],
+        }
+        tmp = self.cache_file.with_suffix('.tmp')
+        try:
+            tmp.write_text(json.dumps(data), encoding='utf-8')
+            tmp.replace(self.cache_file)  # troca atômica: nunca deixa um cache pela metade
+        except OSError as e:
+            log.warning("Não foi possível salvar o cache: %s", e)
 
     # ─── Fontes de temperatura ─────────────────────────────────────────────────
     def _synthetic_temps(self):
@@ -92,39 +151,64 @@ class ThermalSimulation:
         # Uma localização -> objeto; várias localizações -> lista (ordem preservada)
         if isinstance(body, dict):
             body = [body]
-        return [((item or {}).get('current') or {}).get('temperature_2m') for item in body]
+        out = []
+        for item in body:
+            current = (item or {}).get('current') or {}
+            out.append((current.get('temperature_2m'), current.get('time')))
+        return out
 
     def _fetch_real_temps(self):
-        temps = {}
-        coords = self.unique_coords
+        """Busca as localizações que faltam na rodada atual. Devolve (temps, observado) ou None.
+
+        Chunks já baixados ficam em `self._partial`: se a rodada falhar no meio, a próxima
+        tentativa só busca o que falta, sem gastar a cota de novo.
+        """
+        if time.time() - self._partial_started > PARTIAL_MAX_AGE:
+            self._partial = {}
+        if not self._partial:
+            self._partial_started = time.time()
+
+        missing = [c for c in self.unique_coords if c not in self._partial]
         try:
-            for i in range(0, len(coords), CHUNK):
-                chunk = coords[i:i + CHUNK]
+            for i in range(0, len(missing), CHUNK):
+                chunk = missing[i:i + CHUNK]
                 vals = self._fetch_chunk(chunk)
                 if len(vals) != len(chunk):
-                    vals = (vals + [None] * len(chunk))[:len(chunk)]
+                    vals = (vals + [(None, None)] * len(chunk))[:len(chunk)]
                 for coord, v in zip(chunk, vals):
-                    temps[coord] = v
+                    self._partial[coord] = v
                 time.sleep(0.3)  # educado entre as requisições
         except HTTPError as e:
             if e.code == 429:
-                self._backoff_until = time.time() + RATE_LIMIT_BACKOFF
-                print(f"Open-Meteo rate limited (429). Backing off {RATE_LIMIT_BACKOFF}s.")
+                wait = max(RATE_LIMIT_BACKOFF, retry_after_seconds(e))
+                log.warning("Open-Meteo rate limited (429). Backing off %ss.", wait)
             else:
-                print("Open-Meteo HTTP error:", e)
+                wait = self._error_backoff()
+                log.warning("Open-Meteo HTTP error: %s. Nova tentativa em %ss.", e, wait)
+            self._backoff_until = time.time() + wait
             return None
         except Exception as e:
-            print("Open-Meteo fetch failed:", e)
+            wait = self._error_backoff()
+            self._backoff_until = time.time() + wait
+            log.warning("Open-Meteo fetch failed: %s. Nova tentativa em %ss.", e, wait)
             return None
 
-        # Preenche amostras faltantes (falhas raras) com uma estimativa por latitude
-        for coord in coords:
-            if temps.get(coord) is None:
-                temps[coord] = latitude_estimate(coord[0])
-        return temps
+        fetched, self._partial = self._partial, {}
+        temps = {}
+        observed = [t for _, t in fetched.values() if t]
+        for coord in self.unique_coords:
+            temp = fetched[coord][0]
+            # Preenche amostras faltantes (falhas raras) com uma estimativa por latitude
+            temps[coord] = temp if temp is not None else latitude_estimate(coord[0])
+        observed_at = (max(observed) + 'Z') if observed else None
+        return temps, observed_at
+
+    def _error_backoff(self):
+        self._failures += 1
+        return min(ERROR_BACKOFF_MAX, ERROR_BACKOFF_BASE * 2 ** (self._failures - 1))
 
     # ─── Estado ─────────────────────────────────────────────────────────────────
-    def _apply(self, temps, source):
+    def _apply(self, temps, source, updated_at=None, observed_at=None):
         # `temps` vem indexado por localização única; expande para a grade completa
         points = [{'lat': lat, 'lng': lng, 'temp': round(float(temps[canonical(lat, lng)]), 2)}
                   for (lat, lng) in self.coords]
@@ -139,7 +223,8 @@ class ThermalSimulation:
             self._points = points
             self._stats = stats
             self.source = source
-            self.last_update = time.time()
+            self.last_update = updated_at if updated_at is not None else time.time()
+            self.observed_at = observed_at
 
     def _refresh_loop(self):
         while True:
@@ -157,17 +242,22 @@ class ThermalSimulation:
                 self._force = False
                 self.refreshing = True
                 try:
-                    real = self._fetch_real_temps()
+                    result = self._fetch_real_temps()
                 finally:
                     self.refreshing = False
-                if real is not None:
+                if result is not None:
+                    temps, observed_at = result
+                    self._failures = 0
                     self._backoff_until = 0.0
-                    self._apply(real, 'open-meteo')
-                    print(f"Real temperatures updated — min {self._stats['min']}  "
-                          f"avg {self._stats['avg']}  max {self._stats['max']}")
+                    self._apply(temps, 'open-meteo', observed_at=observed_at)
+                    self._save_cache(temps)
+                    log.info("Real temperatures updated — min %s  avg %s  max %s",
+                             self._stats['min'], self._stats['avg'], self._stats['max'])
 
             # Verifica logo enquanto faltar dado real; relaxa quando já tiver.
             timeout = 20 if self.source != 'open-meteo' else 30
+            if self._backoff_until > time.time():
+                timeout = max(1, min(timeout, self._backoff_until - time.time()))
             self._refresh_now.wait(timeout=timeout)
             self._refresh_now.clear()
 
@@ -202,24 +292,32 @@ class ThermalSimulation:
                 'interval_min': MIN_INTERVAL_MIN,
                 'interval_max': MAX_INTERVAL_MIN,
                 'last_update': self.last_update,
+                'observed_at': self.observed_at,
                 'next_update': next_update,
                 'refreshing': self.refreshing,
+                'retrying': now < self._backoff_until,
                 'source': self.source,
             }
-
-
-sim = ThermalSimulation()
 
 
 class CustomHandler(http.server.SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(STATIC_DIR), **kwargs)
 
+    @property
+    def sim(self):
+        return self.server.sim
+
     def end_headers(self):
-        self.send_header('Cache-Control', 'no-store, no-cache, must-revalidate')
-        self.send_header('Pragma', 'no-cache')
-        self.send_header('Expires', '0')
+        # A API nunca é cacheada; os arquivos estáticos são revalidados (If-Modified-Since)
+        if urlparse(self.path).path.startswith('/api/'):
+            self.send_header('Cache-Control', 'no-store')
+        else:
+            self.send_header('Cache-Control', 'no-cache')
         super().end_headers()
+
+    def log_message(self, format, *args):
+        log.debug("%s - %s", self.address_string(), format % args)
 
     def _send_json(self, status, obj):
         body = json.dumps(obj).encode('utf-8')
@@ -232,7 +330,7 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
     def do_GET(self):
         parsed_path = urlparse(self.path)
         if parsed_path.path == '/api/data':
-            self._send_json(200, sim.get_data())
+            self._send_json(200, self.sim.get_data())
         else:
             super().do_GET()
 
@@ -272,15 +370,25 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             if isinstance(value, bool) or not isinstance(value, (int, float)):
                 self._send_json(400, {'error': 'interval must be a number of minutes'})
                 return
-            result['interval'] = sim.set_interval(value)
+            result['interval'] = self.sim.set_interval(value)
         if payload.get('action') == 'force_update':
-            accepted, seconds = sim.request_refresh()
+            accepted, seconds = self.sim.request_refresh()
             result['refresh'] = 'queued' if accepted else 'cooldown'
             result['retry_after'] = seconds
         self._send_json(200, result)
 
 
-if __name__ == "__main__":
+def main():
+    logging.basicConfig(
+        level=os.environ.get('GLOBETEMP_LOG_LEVEL', 'INFO').upper(),
+        format='%(asctime)s %(levelname)-7s %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S',
+    )
     with http.server.ThreadingHTTPServer((HOST, PORT), CustomHandler) as httpd:
-        print(f"Serving at http://{'localhost' if HOST in ('127.0.0.1', '') else HOST}:{PORT}")
+        httpd.sim = ThermalSimulation()
+        log.info("Serving at http://%s:%s", 'localhost' if HOST in ('127.0.0.1', '') else HOST, PORT)
         httpd.serve_forever()
+
+
+if __name__ == "__main__":
+    main()
