@@ -3,7 +3,7 @@
     --panel-bg: rgba(13, 17, 23, 0.65);
     --panel-border: rgba(255, 255, 255, 0.08);
     --text-main: #e6edf3;
-    --text-muted: #7d8590;
+    --text-muted: #9198a1;   /* contraste ≥ 4.5:1 sobre o painel */
     --accent-blue: #58a6ff;
     --accent-green: #3fb950;
     --accent-red: #f85149;
@@ -189,7 +189,6 @@ select {
     border-radius: 8px;
     color: var(--text-main);
     font-size: 0.95rem;
-    outline: none;
     cursor: pointer;
     appearance: none;
     background-image: url("data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22292.4%22%20height%3D%22292.4%22%3E%3Cpath%20fill%3D%22%237d8590%22%20d%3D%22M287%2069.4a17.6%2017.6%200%200%200-13-5.4H18.4c-5%200-9.3%201.8-12.9%205.4A17.6%2017.6%200%200%200%200%2082.2c0%205%201.8%209.3%205.4%2012.9l128%20127.9c3.6%203.6%207.8%205.4%2012.8%205.4s9.2-1.8%2012.8-5.4L287%2095c3.5-3.5%205.4-7.8%205.4-12.8%200-5-1.9-9.2-5.5-12.8z%22%2F%3E%3C%2Fsvg%3E");
@@ -198,7 +197,21 @@ select {
     background-size: 10px auto;
 }
 
-select:focus {
+select option {
+    background: var(--bg-color);
+}
+
+/* Foco visível só na navegação por teclado */
+:focus {
+    outline: none;
+}
+
+:focus-visible {
+    outline: 2px solid var(--accent-blue);
+    outline-offset: 2px;
+}
+
+select:focus-visible {
     border-color: var(--accent-blue);
     box-shadow: 0 0 0 2px rgba(88, 166, 255, 0.2);
 }
@@ -437,5 +450,16 @@ button:disabled {
 
     .header h1 {
         font-size: 1.1rem;
+    }
+}
+
+/* Menos movimento para quem pede (a rotação automática é desligada em js/globe.js) */
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
     }
 }

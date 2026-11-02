@@ -1,0 +1,20 @@
+{
+  "name": "globetemp",
+  "version": "0.3.0",
+  "private": true,
+  "description": "Globo 3D com o mapa de calor da temperatura global (Open-Meteo).",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "lint": "eslint .",
+    "test": "node --test \"tests/js/*.test.js\""
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "eslint": "10.13.0",
+    "globals": "17.13.0"
+  }
+}

@@ -298,7 +298,7 @@ Calcular a posição real do sol (declinação + hora UTC) e posicionar a `Direc
 4. Painel responsivo/recolhível (4.3).
 5. Reescrever README, `.gitignore`, LICENSE (5).
 
-**Fase 3 — Qualidade e performance (2–4 dias)**
+**Fase 3 — Qualidade e performance (2–4 dias)** ✅ *Aplicada em 2026-11-02. Textura atualizada direto do canvas (sem shader nem Web Worker: com ~20 ms por troca de paleta não foi preciso). Paleta Glacier trocada por Viridis e Cividis. CI no GitHub Actions com Python 3.10/3.14 e Node 22.*
 1. Modularizar o JS e o Python (2.6, 3.6).
 2. Textura via `CanvasTexture` ou shader (3.2).
 3. Paletas revisadas e acessíveis (4.2, 4.5).

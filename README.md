@@ -8,23 +8,26 @@ Globo terrestre 3D interativo com um mapa de calor da **temperatura real do ar a
 
 - **Globo 3D** com rotação automática (para ao arrastar), relevo, fronteiras dos países e atmosfera colorida.
 - **Mapa de calor** gerado num canvas equiretangular (2048×1024) por interpolação bilinear da grade e aplicado como textura do globo.
-- **4 escalas de cor** (Thermal, Plasma, Magma, Glacier) com **legenda** de -40 °C a 50 °C.
+- **5 escalas de cor** com **legenda** de -40 °C a 50 °C: Thermal (divergente, centrada em 0 °C), Viridis, Cividis (segura para daltonismo), Plasma e Magma. A escolha fica salva no navegador.
 - **Tooltip** com a temperatura interpolada sob o cursor (o mesmo valor que o mapa pinta) e as coordenadas. No celular, toque sem arrastar.
 - **Estatísticas**: mínimo, máximo e média global **ponderada por área**.
 - **Indicador de estado**: `Live`, `Updating`, `Retrying`, `Stale`, `Estimated`, `Offline`.
 - **Horário da observação** e crédito ao Open-Meteo no rodapé do painel.
 - **Atualização** automática (90–360 min) com contagem regressiva e botão **Force Update** (cooldown de 10 min).
 - **Painel recolhível**, que vira uma folha na parte de baixo da tela no celular.
+- **Acessibilidade**: foco visível no teclado, rótulos nos controles e menos movimento (sem rotação automática nem animações) para quem ativa `prefers-reduced-motion`.
 
 ---
 
 ## Como executar
 
-**Pré-requisito:** Python 3.8+. Não há dependências externas.
+**Pré-requisito:** Python 3.10+. Não há dependências externas para rodar.
 
 ```bash
-python server.py
+python -m globetemp
 ```
+
+`python server.py` também funciona (é só um atalho para o mesmo comando).
 
 Abra <http://localhost:5005>.
 
@@ -53,18 +56,42 @@ O plano gratuito do Open-Meteo é limitado por **número de localizações** (~6
 - Se uma rodada falhar no meio, os lotes já baixados são reaproveitados na próxima tentativa (por até 30 min).
 - Erros usam **backoff exponencial** (30 s → 1 min → … → 30 min). Um `429` espera pelo menos 5 min, ou o `Retry-After` se for maior.
 
-### Backend (`server.py`)
+### Estrutura
 
-- `ThermalSimulation` mantém a grade, as estatísticas e uma thread em segundo plano que decide quando buscar (intervalo vencido, atualização forçada ou ainda sem dado real).
+```
+globetemp/            backend (pacote Python)
+  config.py           constantes e variáveis de ambiente
+  grid.py             grade, localizações únicas, estatísticas ponderadas por área
+  open_meteo.py       cliente da API
+  service.py          TemperatureService: cache em disco, agendamento, backoff
+  web.py              handler HTTP (arquivos estáticos + API)
+  __main__.py         `python -m globetemp`
+static/
+  index.html, style.css
+  js/
+    main.js           liga tudo: estado, agendamento das buscas, controles
+    palettes.js       escalas de cor e tabela de cores (puro, testado no Node)
+    grid.js           grade, interpolação bilinear, coloração (puro, testado no Node)
+    heatmap.js        canvas → textura do globo
+    globe.js          configuração do globe.gl e fronteiras
+    api.js, config.js
+    ui/               tooltip, legenda, painel, status
+tests/                pytest (backend) e tests/js (node:test)
+```
+
+### Backend
+
+- `TemperatureService` mantém a grade, as estatísticas e uma thread em segundo plano que decide quando buscar (intervalo vencido, atualização forçada ou ainda sem dado real).
 - A média global é ponderada por `cos(latitude)`, porque cada ponto de uma grade equiretangular cobre menos área perto dos polos.
 - Servidor `ThreadingHTTPServer`. A API não é cacheada; os arquivos estáticos são revalidados.
 
-### Frontend (`static/app.js`)
+### Frontend
 
 1. Busca `/api/data` e monta a grade `lat × lng`.
-2. Interpola cada pixel do canvas com `sampleTemp` (bilinear) e converte para cor via uma tabela pré-calculada da paleta ativa.
-3. Mistura uma textura sutil da Terra para os continentes continuarem reconhecíveis e aplica o canvas como textura do globo.
-4. Agenda a próxima busca para o `next_update` do servidor, com um mínimo de 10 s entre buscas e nova tentativa a cada 15 s se o servidor não responder.
+2. Interpola o campo de temperatura de cada pixel do canvas (bilinear, `grid.js`) e o colore com a tabela pré-calculada da paleta ativa. Trocar de paleta só refaz a coloração.
+3. Mistura uma textura sutil da Terra para os continentes continuarem reconhecíveis e atualiza a textura do globo direto a partir do canvas (sem `toDataURL`).
+4. O tooltip usa a mesma interpolação (`sampleTemp`), então o número sempre bate com a cor.
+5. Agenda a próxima busca para o `next_update` do servidor, com um mínimo de 10 s entre buscas e nova tentativa a cada 15 s se o servidor não responder.
 
 ---
 
@@ -114,9 +141,27 @@ Resposta:
 
 ## Personalização
 
-- **Resolução da grade**: `GRID_STEP` em `server.py`. O cliente deriva os eixos dos dados, então não precisa mudar nada no JS. Recalcule a cota antes: localizações únicas × atualizações por dia deve ficar abaixo de 10.000.
-- **Paletas**: `paletteDefs` em `app.js`. Cada paleta é uma lista de pontos `{ t, c }` (temperatura → RGB).
-- **Aparência do globo**: texturas, luzes e atmosfera são configuradas logo no início de `app.js`.
+- **Resolução da grade**: `GRID_STEP` em `globetemp/config.py`. O cliente deriva os eixos dos dados, então não precisa mudar nada no JS. Recalcule a cota antes: localizações únicas × atualizações por dia deve ficar abaixo de 10.000.
+- **Paletas**: `PALETTES` em `static/js/palettes.js`. Cada paleta tem um rótulo, a cor da atmosfera e uma lista de paradas `{ t, c }` (temperatura → RGB). O seletor e a legenda são gerados a partir dela.
+- **Aparência do globo**: luzes, relevo e atmosfera em `static/js/globe.js`; a sobreposição da Terra em `static/js/heatmap.js`.
+
+---
+
+## Desenvolvimento
+
+```bash
+pip install -r requirements-dev.txt
+npm install
+```
+
+| Comando | O que faz |
+|---|---|
+| `pytest` | Testes do backend (sem rede: o Open-Meteo é simulado). |
+| `ruff check .` / `ruff format .` | Lint e formatação do Python. |
+| `npm test` | Testes do JS puro (`palettes.js`, `grid.js`, status) com `node:test`. |
+| `npm run lint` | ESLint no JS. |
+
+O GitHub Actions (`.github/workflows/ci.yml`) roda tudo isso em cada push no `master` e em cada pull request.
 
 ---
 
@@ -124,7 +169,8 @@ Resposta:
 
 - **Python** (`http.server`, `threading`, `urllib`): servidor, agendamento e cache.
 - **globe.gl 2.46.2** / **Three.js**: renderização WebGL do globo.
-- **HTML / CSS / JavaScript** sem build.
+- **HTML / CSS / JavaScript** com ES modules nativos, sem build.
+- **pytest**, **ruff**, **ESLint** e **node:test** no desenvolvimento.
 
 ## Licença
 
