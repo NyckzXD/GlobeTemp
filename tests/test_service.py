@@ -16,17 +16,20 @@ def test_starts_with_synthetic_data_without_cache(make_service):
     svc = make_service()
     data = svc.get_data()
     assert data['source'] == 'synthetic'
-    assert data['observed_at'] is None
-    assert len(data['points']) == 496
+    assert len(data['grid']['times']) == 1
+    assert len(data['grid']['values'][0]) == 1891
+    assert len(data['stats']) == 1
 
 
 def test_refresh_fetches_unique_locations_in_chunks(make_service, fake_api):
     svc = make_service()
     assert svc.refresh_once()
-    assert [len(c) for c in fake_api.calls] == [100, 100, 100, 100, 22]
+    assert [len(c) for c in fake_api.calls] == [100] * 17 + [42]
     data = svc.get_data()
     assert data['source'] == 'open-meteo'
-    assert data['observed_at'] == '2026-11-02T17:30Z'
+    assert data['grid']['times'] == list(fake_api.TIMES)
+    assert len(data['grid']['values']) == 3
+    assert [s['max'] for s in data['stats']] == [29.0, 30.0, 31.0]
 
 
 def test_failed_round_reuses_downloaded_chunks(make_service, fake_api):
@@ -38,8 +41,52 @@ def test_failed_round_reuses_downloaded_chunks(make_service, fake_api):
     svc._backoff_until = 0  # simula o fim da espera
     assert svc.refresh_once()
     sizes = [len(c) for c in fake_api.calls]
-    # 2 chunks ok + 1 com erro; depois só os 222 que faltavam
-    assert sizes == [100, 100, 100, 100, 100, 22]
+    # 2 chunks ok + 1 com erro; depois só os 1.542 que faltavam
+    assert sizes == [100, 100, 100] + [100] * 15 + [42]
+
+
+def test_only_times_shared_by_all_locations_are_kept(make_service, fake_api):
+    svc = make_service()
+    # O segundo lote chegou depois da virada da hora: a janela andou uma hora
+    original = fake_api.__call__
+
+    def shifted(chunk):
+        vals = original(chunk)
+        if len(fake_api.calls) == 2:
+            vals = [
+                {'2026-11-02T20:00': 0.0, **{t: v for t, v in s.items() if t != fake_api.TIMES[0]}}
+                for s in vals
+            ]
+        return vals
+
+    svc.fetch_chunk = shifted
+    assert svc.refresh_once()
+    assert svc.get_data()['grid']['times'] == list(fake_api.TIMES[1:])
+
+
+def test_missing_values_are_filled_with_latitude_estimate(make_service, fake_api):
+    svc = make_service()
+    original = fake_api.__call__
+    svc.fetch_chunk = lambda chunk: [{**s, fake_api.TIMES[0]: None} for s in original(chunk)]
+    assert svc.refresh_once()
+    first = svc.get_data()['grid']['values'][0]
+    # índice da linha do equador (lat 0) na grade completa
+    equator = svc.grid.lats.index(0) * len(svc.grid.lngs)
+    assert first[equator] == pytest.approx(35)
+
+
+def test_daily_budget_blocks_extra_rounds(make_service, monkeypatch):
+    monkeypatch.setattr(config, 'DAILY_LOCATION_BUDGET', 4000)
+    svc = make_service()
+    assert svc.refresh_once()
+    assert svc.budget_wait() == 0  # 1.742 + 1.742 cabem em 4.000
+    assert svc.refresh_once()
+    wait = svc.budget_wait()
+    assert 0 < wait <= 86400
+    accepted, retry = svc.request_refresh()
+    assert not accepted
+    assert retry >= wait
+    assert not svc.is_due()
 
 
 def test_error_backoff_grows_exponentially_with_ceiling(make_service):
@@ -102,6 +149,6 @@ def test_force_refresh_has_cooldown(make_service):
     assert 0 < wait <= config.FORCE_COOLDOWN
 
 
-@pytest.mark.parametrize(('value', 'expected'), [(15, 90), (120, 120), (9999, 360)])
+@pytest.mark.parametrize(('value', 'expected'), [(15, 360), (480, 480), (9999, 720)])
 def test_interval_is_clamped(make_service, value, expected):
     assert make_service().set_interval(value) == expected
