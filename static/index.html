@@ -47,12 +47,7 @@
 
             <div class="control-section">
                 <h3><label for="theme-selector">Color Scale</label></h3>
-                <select id="theme-selector">
-                    <option value="thermal">Thermal (Classic)</option>
-                    <option value="plasma">Plasma (Neon)</option>
-                    <option value="magma">Magma (Volcanic)</option>
-                    <option value="glacier">Glacier (Subzero)</option>
-                </select>
+                <select id="theme-selector"><!-- opções geradas a partir de js/palettes.js --></select>
                 <div class="legend" aria-hidden="true">
                     <div class="legend-bar" id="legend-bar"></div>
                     <div class="legend-ticks" id="legend-ticks"></div>
@@ -81,7 +76,7 @@
         </div>
     </div>
     
-    <!-- JS personalizado -->
-    <script src="app.js"></script>
+    <!-- JS personalizado (ES modules) -->
+    <script type="module" src="js/main.js"></script>
 </body>
 </html>
