@@ -35,7 +35,7 @@ class RequestHandler(http.server.SimpleHTTPRequestHandler):
         super().end_headers()
 
     def log_message(self, format, *args):
-        log.debug("%s - %s", self.address_string(), format % args)
+        log.debug('%s - %s', self.address_string(), format % args)
 
     def _send_json(self, status, obj):
         body = json.dumps(obj).encode('utf-8')

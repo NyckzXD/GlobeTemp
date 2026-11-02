@@ -20,8 +20,14 @@ class TemperatureService:
     memória (para a API) e em disco (para sobreviver a reinícios sem gastar cota).
     """
 
-    def __init__(self, grid=None, fetch_chunk=open_meteo.fetch_chunk,
-                 cache_file=config.CACHE_FILE, pause=config.CHUNK_PAUSE, start=True):
+    def __init__(
+        self,
+        grid=None,
+        fetch_chunk=open_meteo.fetch_chunk,
+        cache_file=config.CACHE_FILE,
+        pause=config.CHUNK_PAUSE,
+        start=True,
+    ):
         self.grid = grid or Grid()
         self.fetch_chunk = fetch_chunk
         self.cache_file = Path(cache_file) if cache_file else None
@@ -34,7 +40,7 @@ class TemperatureService:
         self._failures = 0
         self._force = False
         self._last_forced = 0.0
-        self._partial = {}            # localização -> (temp, horário observado)
+        self._partial = {}  # localização -> (temp, horário observado)
         self._partial_started = 0.0
         self.refreshing = False
 
@@ -61,15 +67,19 @@ class TemperatureService:
             saved = json.loads(self.cache_file.read_text(encoding='utf-8'))
             temps = {(la, ln): t for la, ln, t in saved['temps']}
             if set(temps) != set(self.grid.unique_coords):
-                log.info("Cache ignorado: a grade mudou desde que foi salvo.")
+                log.info('Cache ignorado: a grade mudou desde que foi salvo.')
                 return False
-            self._apply(temps, 'open-meteo', updated_at=float(saved['last_update']),
-                        observed_at=saved.get('observed_at'))
+            self._apply(
+                temps,
+                'open-meteo',
+                updated_at=float(saved['last_update']),
+                observed_at=saved.get('observed_at'),
+            )
         except (OSError, ValueError, KeyError, TypeError) as e:
-            log.warning("Cache inválido em %s: %s", self.cache_file, e)
+            log.warning('Cache inválido em %s: %s', self.cache_file, e)
             return False
         age_min = (time.time() - self.last_update) / 60
-        log.info("Dados carregados do cache (%.0f min atrás).", age_min)
+        log.info('Dados carregados do cache (%.0f min atrás).', age_min)
         return True
 
     def _save_cache(self, temps):
@@ -85,7 +95,7 @@ class TemperatureService:
             tmp.write_text(json.dumps(data), encoding='utf-8')
             tmp.replace(self.cache_file)  # troca atômica: nunca deixa um cache pela metade
         except OSError as e:
-            log.warning("Não foi possível salvar o cache: %s", e)
+            log.warning('Não foi possível salvar o cache: %s', e)
 
     # ─── Busca ─────────────────────────────────────────────────────────────────
     def _fetch_real_temps(self):
@@ -102,27 +112,27 @@ class TemperatureService:
         missing = [c for c in self.grid.unique_coords if c not in self._partial]
         try:
             for i in range(0, len(missing), config.CHUNK):
-                chunk = missing[i:i + config.CHUNK]
+                chunk = missing[i : i + config.CHUNK]
                 vals = self.fetch_chunk(chunk)
                 if len(vals) != len(chunk):
-                    vals = (list(vals) + [(None, None)] * len(chunk))[:len(chunk)]
-                for coord, v in zip(chunk, vals):
+                    vals = (list(vals) + [(None, None)] * len(chunk))[: len(chunk)]
+                for coord, v in zip(chunk, vals, strict=True):
                     self._partial[coord] = v
                 if self.pause:
                     time.sleep(self.pause)
         except HTTPError as e:
             if e.code == 429:
                 wait = max(config.RATE_LIMIT_BACKOFF, open_meteo.retry_after_seconds(e))
-                log.warning("Open-Meteo rate limited (429). Backing off %ss.", wait)
+                log.warning('Open-Meteo rate limited (429). Backing off %ss.', wait)
             else:
                 wait = self._error_backoff()
-                log.warning("Open-Meteo HTTP error: %s. Nova tentativa em %ss.", e, wait)
+                log.warning('Open-Meteo HTTP error: %s. Nova tentativa em %ss.', e, wait)
             self._backoff_until = time.time() + wait
             return None
         except Exception as e:
             wait = self._error_backoff()
             self._backoff_until = time.time() + wait
-            log.warning("Open-Meteo fetch failed: %s. Nova tentativa em %ss.", e, wait)
+            log.warning('Open-Meteo fetch failed: %s. Nova tentativa em %ss.', e, wait)
             return None
 
         fetched, self._partial = self._partial, {}
@@ -165,8 +175,12 @@ class TemperatureService:
         self._backoff_until = 0.0
         self._apply(temps, 'open-meteo', observed_at=observed_at)
         self._save_cache(temps)
-        log.info("Real temperatures updated — min %s  avg %s  max %s",
-                 self._stats['min'], self._stats['avg'], self._stats['max'])
+        log.info(
+            'Real temperatures updated — min %s  avg %s  max %s',
+            self._stats['min'],
+            self._stats['avg'],
+            self._stats['max'],
+        )
         return True
 
     def is_due(self, now=None):
@@ -174,7 +188,7 @@ class TemperatureService:
         if now < self._backoff_until:
             return False
         if self._force or self.source != 'open-meteo':
-            return True                        # forçado, ou ainda sem dado real
+            return True  # forçado, ou ainda sem dado real
         return (now - self.last_update) >= self.interval * 60
 
     def _refresh_loop(self):

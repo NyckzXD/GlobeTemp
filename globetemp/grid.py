@@ -34,8 +34,10 @@ class Grid:
 
     def points(self, temps):
         """Expande `temps` (por localização única) para a lista de pontos da grade completa."""
-        return [{'lat': lat, 'lng': lng, 'temp': round(float(temps[canonical(lat, lng)]), 2)}
-                for (lat, lng) in self.coords]
+        return [
+            {'lat': lat, 'lng': lng, 'temp': round(float(temps[canonical(lat, lng)]), 2)}
+            for (lat, lng) in self.coords
+        ]
 
     def stats(self, temps):
         """Mínimo, máximo e média ponderada por área (cos da latitude).
@@ -44,5 +46,5 @@ class Grid:
         """
         values = [float(temps[c]) for c in self.unique_coords]
         weights = [math.cos(math.radians(lat)) for lat, _ in self.unique_coords]
-        avg = sum(v * w for v, w in zip(values, weights)) / sum(weights)
+        avg = sum(v * w for v, w in zip(values, weights, strict=True)) / sum(weights)
         return {'min': round(min(values), 1), 'max': round(max(values), 1), 'avg': round(avg, 1)}

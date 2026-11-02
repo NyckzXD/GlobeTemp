@@ -15,7 +15,7 @@ def main():
     )
     with make_server(TemperatureService()) as httpd:
         host = 'localhost' if config.HOST in ('127.0.0.1', '') else config.HOST
-        log.info("Serving at http://%s:%s", host, config.PORT)
+        log.info('Serving at http://%s:%s', host, config.PORT)
         httpd.serve_forever()
 
 
