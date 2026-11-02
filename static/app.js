@@ -303,7 +303,7 @@ function applyHeatmap(points, palette) {
 
 // ─── Tooltip (ao passar o mouse) ──────────────────────────────────────────────
 const tooltip = document.createElement('div');
-tooltip.className = 'scene-tooltip';
+tooltip.className = 'heatmap-tooltip';
 tooltip.hidden = true;
 const tooltipTitle = Object.assign(document.createElement('div'), { className: 'tooltip-title', textContent: 'Temperature' });
 const tooltipValue = Object.assign(document.createElement('div'), { className: 'tooltip-value' });
@@ -374,9 +374,42 @@ globeContainer.addEventListener('pointerup', (e) => {
 
 // ─── Busca e atualização ──────────────────────────────────────────────────────
 
-function setStatus(text) {
-    const statusLabel = document.getElementById('status-label');
-    if (statusLabel) statusLabel.textContent = text;
+// Estado → texto do indicador; a cor vem do CSS via data-state
+const STATUS_LABELS = {
+    loading: 'Loading',
+    live: 'Live',
+    stale: 'Stale',
+    updating: 'Updating',
+    retrying: 'Retrying',
+    estimated: 'Estimated',
+    offline: 'Offline'
+};
+
+function setStatus(state) {
+    document.getElementById('status-indicator').dataset.state = state;
+    document.getElementById('status-label').textContent = STATUS_LABELS[state];
+}
+
+function statusFor(data) {
+    if (data.refreshing) return 'updating';
+    if (data.source !== 'open-meteo') return 'estimated';
+    if (data.retrying) return 'retrying';
+    // Dado real, mas bem mais velho que o intervalo (ex.: cache antigo, API fora do ar)
+    const ageMs = Date.now() - data.last_update * 1000;
+    return ageMs > data.interval * 60 * 1000 * 1.5 ? 'stale' : 'live';
+}
+
+function updateObservedAt(data) {
+    const el = document.getElementById('observed-at');
+    if (data.source !== 'open-meteo') {
+        el.textContent = 'Latitude estimate — waiting for live data';
+        return;
+    }
+    const when = new Date(data.observed_at || data.last_update * 1000);
+    const time = when.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const sameDay = when.toDateString() === new Date().toDateString();
+    el.textContent = `Observed ${sameDay ? time : `${when.toLocaleDateString()} ${time}`}`;
+    el.title = when.toISOString();
 }
 
 async function fetchData() {
@@ -387,7 +420,7 @@ async function fetchData() {
         data = await response.json();
     } catch (err) {
         console.error('Failed to fetch data', err);
-        setStatus('Offline');
+        setStatus('offline');
         nextUpdate = Date.now() + RETRY_ON_ERROR_MS;
         startCountdown();
         return null;
@@ -404,7 +437,8 @@ async function fetchData() {
         renderedUpdate = data.last_update;
     }
 
-    setStatus(data.refreshing ? 'Updating' : (data.source === 'open-meteo') ? 'Live' : 'Sim');
+    setStatus(statusFor(data));
+    updateObservedAt(data);
 
     document.getElementById('min-temp').textContent = `${data.stats.min}°C`;
     document.getElementById('avg-temp').textContent = `${data.stats.avg}°C`;
@@ -450,7 +484,7 @@ async function forceUpdate() {
         }
         const before = lastUpdate;
         const deadline = Date.now() + FORCE_POLL_TIMEOUT_MS;
-        setStatus('Updating');
+        setStatus('updating');
         while (Date.now() < deadline) {
             await sleep(FORCE_POLL_MS);
             const data = await fetchData();
@@ -489,6 +523,52 @@ function startCountdown() {
     countdownIntervalId = setInterval(tick, 1000);
 }
 
+// ─── Legenda e painel ─────────────────────────────────────────────────────────
+
+const LEGEND_MIN = -40;
+const LEGEND_MAX = 50;
+const LEGEND_TICKS = [-40, -20, 0, 20, 40];
+
+function renderLegend(palette) {
+    const stops = [];
+    for (let t = LEGEND_MIN; t <= LEGEND_MAX; t += 5) {
+        const [r, g, b] = interpolateColor(t, palette);
+        stops.push(`rgb(${r},${g},${b}) ${((t - LEGEND_MIN) / (LEGEND_MAX - LEGEND_MIN)) * 100}%`);
+    }
+    document.getElementById('legend-bar').style.background = `linear-gradient(90deg, ${stops.join(', ')})`;
+
+    const ticks = document.getElementById('legend-ticks');
+    ticks.replaceChildren(...LEGEND_TICKS.map((t) => {
+        const span = document.createElement('span');
+        span.textContent = `${t}°`;
+        span.style.left = `${((t - LEGEND_MIN) / (LEGEND_MAX - LEGEND_MIN)) * 100}%`;
+        return span;
+    }));
+}
+
+// Painel recolhível; começa recolhido em telas estreitas e lembra a escolha
+const PANEL_KEY = 'globetemp.panelCollapsed';
+const panel = document.getElementById('dashboard-panel');
+const panelToggle = document.getElementById('panel-toggle');
+
+function setPanelCollapsed(collapsed) {
+    panel.classList.toggle('collapsed', collapsed);
+    panelToggle.setAttribute('aria-expanded', String(!collapsed));
+    panelToggle.setAttribute('aria-label', collapsed ? 'Expand panel' : 'Collapse panel');
+}
+
+let savedCollapsed = null;
+try { savedCollapsed = localStorage.getItem(PANEL_KEY); } catch (e) { /* storage bloqueado */ }
+setPanelCollapsed(savedCollapsed !== null
+    ? savedCollapsed === 'true'
+    : window.matchMedia('(max-width: 640px)').matches);
+
+panelToggle.addEventListener('click', () => {
+    const collapsed = !panel.classList.contains('collapsed');
+    setPanelCollapsed(collapsed);
+    try { localStorage.setItem(PANEL_KEY, String(collapsed)); } catch (e) { /* storage bloqueado */ }
+});
+
 // ─── Ouvintes de eventos ──────────────────────────────────────────────────────
 
 document.getElementById('theme-selector').addEventListener('change', (e) => {
@@ -500,6 +580,7 @@ document.getElementById('theme-selector').addEventListener('change', (e) => {
         glacier: '#003366'
     };
     world.atmosphereColor(atmoColors[currentTheme]);
+    renderLegend(currentTheme);
     if (earthData.length) applyHeatmap(earthData, currentTheme);
 });
 
@@ -522,4 +603,5 @@ window.addEventListener('resize', () => {
 });
 
 // ─── Início ───────────────────────────────────────────────────────────────────
+renderLegend(currentTheme);
 fetchData();

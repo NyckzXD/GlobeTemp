@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Dados locais do servidor
+cache.json
+cache.tmp
+
+# Ambiente / editor
+.env
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
