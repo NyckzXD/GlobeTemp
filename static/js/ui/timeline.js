@@ -17,7 +17,7 @@ function timeAt(grid, t) {
 }
 
 // Linha do tempo da série horária: slider, tocar/pausar e voltar para agora.
-// `onChange(t)` recebe a posição fracionária na série (0 = primeiro horário).
+// `onChange(t, ms)` recebe a posição fracionária na série (0 = primeiro horário) e o instante UTC.
 export function initTimeline(onChange) {
     const slider = document.getElementById('time-slider');
     const label = document.getElementById('time-label');
@@ -43,7 +43,7 @@ export function initTimeline(onChange) {
         slider.value = String(t);
         slider.setAttribute('aria-valuetext', `${label.textContent} (${relative.textContent})`);
         nowBtn.disabled = follow;
-        onChange(t);
+        onChange(t, ms);
     }
 
     function setT(value) {

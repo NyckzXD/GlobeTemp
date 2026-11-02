@@ -4,12 +4,17 @@
 
 import { packFrames } from './grid.js';
 import { LUT_SIZE, SCALE_MAX, SCALE_MIN, getLUT } from './palettes.js';
+import { sunDirection } from './sun.js';
 
 // Constantes do Three.js (o globe.gl embute o Three, mas não exporta o módulo)
 const NEAREST = 1003, LINEAR = 1006, UNSIGNED_BYTE = 1009, FLOAT = 1015, RGBA = 1023, RED = 1028;
 
 // Cor do globo enquanto não há dados
 const EMPTY_COLOR = '0.02, 0.025, 0.035';
+// Brilho do lado noturno (o mapa continua legível) e faixa do crepúsculo, em seno da altura do
+// sol: de −6° (fim do crepúsculo civil) a +3°
+const NIGHT_LEVEL = '0.35';
+const TWILIGHT = '-0.105, 0.052';
 
 const VERTEX_DECL = /* glsl */ 'varying vec2 vGeoUv;\n';
 
@@ -25,6 +30,7 @@ uniform int uFrame1;
 uniform float uMix;
 uniform vec2 uScale;       // faixa da paleta (°C)
 uniform float uReady;
+uniform vec3 uSun;         // direção do sol: x → (0°, 0°), y → (0°, 90° L), z → polo norte
 
 vec4 cubicWeights(float t) {
     float t2 = t * t, t3 = t2 * t;
@@ -73,6 +79,14 @@ vec3 heatColor() {
     vec3 srgb = texture2D(uLut, vec2((k * (lutSize - 1.0) + 0.5) / lutSize, 0.5)).rgb;
     return srgbToLinear(srgb);  // o renderer converte de volta para sRGB na saída
 }
+
+// Terminador dia/noite: seno da altura do sol no fragmento, suavizado no crepúsculo
+float daylight() {
+    float lat = radians(vGeoUv.y * 180.0 - 90.0);
+    float lng = radians(vGeoUv.x * 360.0 - 180.0);
+    vec3 n = vec3(cos(lat) * cos(lng), cos(lat) * sin(lng), sin(lat));
+    return mix(${NIGHT_LEVEL}, 1.0, smoothstep(${TWILIGHT}, dot(n, uSun)));
+}
 `;
 
 // Cria uma textura de dados com o construtor de Texture que o globe.gl já tem carregado
@@ -118,7 +132,8 @@ export function createHeatmapLayer(world) {
         uFrame1: { value: 0 },
         uMix: { value: 0 },
         uScale: { value: [SCALE_MIN, SCALE_MAX] },
-        uReady: { value: 0 }
+        uReady: { value: 0 },
+        uSun: { value: sunDirection(Date.now()) }
     };
 
     // Reaproveita o material Phong do globo e troca só a cor final do fragmento
@@ -132,7 +147,7 @@ export function createHeatmapLayer(world) {
             '#include <uv_vertex>', '#include <uv_vertex>\n\tvGeoUv = uv;');
         shader.fragmentShader = FRAGMENT_DECL + shader.fragmentShader.replace(
             '#include <opaque_fragment>',
-            `outgoingLight = uReady > 0.5 ? heatColor() : vec3(${EMPTY_COLOR});\n\t#include <opaque_fragment>`);
+            `outgoingLight = (uReady > 0.5 ? heatColor() : vec3(${EMPTY_COLOR})) * daylight();\n\t#include <opaque_fragment>`);
     };
     material.customProgramCacheKey = () => 'globetemp-heatmap';
     material.needsUpdate = true;
@@ -173,6 +188,11 @@ export function createHeatmapLayer(world) {
             uniforms.uFrame0.value = f0;
             uniforms.uFrame1.value = Math.min(last, f0 + 1);
             uniforms.uMix.value = tc - f0;
+        },
+
+        // Instante UTC exibido (ms): move o terminador
+        setSunTime(ms) {
+            uniforms.uSun.value = sunDirection(ms);
         }
     };
 }

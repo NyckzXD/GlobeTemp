@@ -33,8 +33,9 @@ const container = document.getElementById('globe-container');
 const world = createGlobe(container);
 const heatmap = createHeatmapLayer(world);
 loadCoastlines(world);
-const timeline = initTimeline((t) => {
+const timeline = initTimeline((t, ms) => {
     heatmap.setTime(t);
+    heatmap.setSunTime(ms);
     // Estatísticas do horário mais próximo do que está na tela
     const stats = state.stats[Math.round(t)];
     if (stats) updateStats(stats);
